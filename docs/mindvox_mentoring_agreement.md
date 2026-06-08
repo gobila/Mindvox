@@ -203,25 +203,25 @@ GET /health
 Verifica se a API esta rodando.
 
 ```text
-POST /api/v1/transcriptions
+POST /transcriptions/v1
 ```
 
 Recebe audio e devolve transcricao.
 
 ```text
-POST /api/v1/transcripts/process
+POST /transcripts/process/v1
 ```
 
 Recebe transcricao e prepara o conteudo para memoria.
 
 ```text
-GET /api/v1/search/semantic?q=consulta
+GET /search/semantic/v1?q=consulta
 ```
 
 Busca por sentido aproximado.
 
 ```text
-GET /api/v1/search/relational
+GET /search/relational/v1
 ```
 
 Busca por campos organizados, como curso, disciplina, aula, sessao, data ou tema.
