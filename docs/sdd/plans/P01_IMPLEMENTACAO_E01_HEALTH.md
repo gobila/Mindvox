@@ -146,7 +146,7 @@ uv run python -m unittest discover -s tests -v
 
 Este plano nao implementa:
 
-- `POST /transcriptions/v1`;
+- `POST /transcriptions/v1.0.0`;
 - autenticacao por `Bearer token`;
 - leitura de `MINDVOX_API_TOKEN`;
 - leitura de `MINDVOX_MAX_UPLOAD_MB`;

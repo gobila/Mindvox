@@ -116,7 +116,7 @@ http://127.0.0.1:8000/docs
 
 Estas tarefas nao implementam:
 
-- `POST /transcriptions/v1`;
+- `POST /transcriptions/v1.0.0`;
 - autenticacao da E02;
 - validacao de audio;
 - `mlx-whisper`;

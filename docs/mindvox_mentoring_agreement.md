@@ -203,7 +203,7 @@ GET /health
 Verifica se a API esta rodando.
 
 ```text
-POST /transcriptions/v1
+POST /transcriptions/v1.0.0
 ```
 
 Recebe audio e devolve transcricao.

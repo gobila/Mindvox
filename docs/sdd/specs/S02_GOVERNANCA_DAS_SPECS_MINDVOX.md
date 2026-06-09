@@ -193,6 +193,18 @@ NOTA_STT_ENGINE_CHOICES.md
 RELATORIO_VERIFICACAO_E02_TRANSCRIPTIONS_2026-06-07.md
 ```
 
+Relatorios tecnicos orientadores devem ficar preferencialmente em:
+
+```text
+docs/sdd/reports/
+```
+
+Interpretacao obrigatoria:
+
+- relatorios em `docs/sdd/reports/` podem consolidar decisoes, auditorias, riscos ou diretrizes;
+- relatorios nao governam codigo por si so;
+- quando uma diretriz de relatorio passar a orientar implementacao, ela deve ser convertida em Spec, Plano, Tarefas ou emenda aprovada na Spec aplicavel.
+
 ---
 
 ## 8. Arvore Inicial de Specs
@@ -367,6 +379,7 @@ Regra de leveza:
 - [ ] `description` definida.
 - [ ] Respostas principais aparecem na documentacao.
 - [ ] Ausencia ou presenca de parametros/body aparece corretamente.
+- [ ] Parametros/body possuem descricoes didaticas com exemplos curtos na documentacao interativa, quando existirem.
 - [ ] `/openapi.json` deve refletir o contrato aprovado.
 
 ### 12.8 Implementacao
@@ -390,12 +403,14 @@ Regra de leveza:
 - [ ] Teste automatizado do OpenAPI criado, quando relevante.
 - [ ] Comando de teste registrado na Spec, plano ou tarefas.
 - [ ] Todos os testes passam antes de iniciar o proximo endpoint.
+- [ ] Teste funcional manual real executado e registrado, quando o endpoint envolver IA, motor externo, modelo local ou efeito que os testes automatizados de contrato nao comprovem integralmente.
 
 ### 12.10 Demonstracao e Explicabilidade
 
 - [ ] Comando de execucao local documentado.
 - [ ] Exemplo de chamada valida documentado.
 - [ ] Exemplo de falha relevante documentado.
+- [ ] Endpoint demonstrado com entrada real representativa, quando aplicavel.
 - [ ] Endpoint consegue ser explicado por finalidade, entrada, processamento, saida, erro e teste.
 - [ ] Limites de escopo estao claros para evitar crescimento indevido.
 
