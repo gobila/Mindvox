@@ -68,12 +68,19 @@ Implementacao proposta:
 - registrar esse router em `src/main.py`;
 - exigir autenticacao por `Authorization: Bearer <token>`;
 - ler o token de configuracao externa por `MINDVOX_API_TOKEN`;
+- usar `dev-token` automaticamente em desenvolvimento local quando `MINDVOX_API_TOKEN` estiver ausente ou vazio;
+- tratar placeholder de exemplo em `MINDVOX_API_TOKEN` como token ausente;
+- tratar `dev-token` como token ausente quando `MINDVOX_PUBLIC_DEPLOYMENT=true`;
+- exibir `Active startup profile` no Swagger/OpenAPI global, indicando `dev`, `contract` ou `prod`;
+- rejeitar `MINDVOX_TRUSTED_HOSTS=*` quando `MINDVOX_PUBLIC_DEPLOYMENT=true`;
+- exigir transporte seguro para `POST /transcriptions/v1.0.0` em deploy publico, aceitando apenas requisicao que chegue a aplicacao com scheme `https`;
+- se TLS terminar em proxy, o proxy e o servidor ASGI devem ser configurados de modo confiavel para repassar o scheme `https`; a aplicacao nao deve confiar em header `X-Forwarded-Proto` enviado livremente pelo cliente;
 - ler o limite de upload por `MINDVOX_MAX_UPLOAD_MB`;
 - usar como motor STT primario `mlx-whisper + mlx-community/whisper-large-v3-turbo-fp16`, conforme [Spec E02, secao 8, Motor STT](../specs/E02_ENDPOINT_TRANSCRIPTIONS.md#8-motor-stt);
 - admitir `mlx-whisper + whisper-small` apenas como fallback de desenvolvimento ou smoke test, sem apresenta-lo como motor final de qualidade;
 - aceitar arquivos `.wav` e `.m4a`;
 - validar nome de arquivo nao vazio, extensao, `content_type`, tamanho e assinatura minima do container de audio;
-- validar metadados opcionais, especialmente `class_date`, `session_label` e `language`;
+- validar metadados opcionais, especialmente `class_date`, `session_label`, `language` e tamanho de `course`, `discipline` e `class_title`;
 - criar schemas Pydantic para a resposta de sucesso;
 - separar a chamada ao motor de transcricao em uma camada de servico;
 - manter o router desacoplado do motor concreto de STT;
@@ -154,10 +161,12 @@ Variaveis esperadas:
 
 | Variavel | Finalidade | Regra |
 | --- | --- | --- |
-| `MINDVOX_API_TOKEN` | Token local do MVP para autenticar o endpoint | Obrigatoria para uso do endpoint |
+| `MINDVOX_API_TOKEN` | Token local do MVP para autenticar o endpoint | Ausente ou vazio usa `dev-token` em desenvolvimento local; em producao publica exige token forte externo |
 | `MINDVOX_MAX_UPLOAD_MB` | Limite maximo de upload em MB | Deve ter padrao seguro para desenvolvimento local, inicialmente `500` |
 | `MINDVOX_TRANSCRIPTION_MODE` | Define modo real ou modo de contrato | `contract` somente para testes automatizados e demonstracao controlada |
 | `MINDVOX_TRANSCRIPTION_MODEL` | Define o modelo usado pelo motor STT | Padrao esperado: `mlx-community/whisper-large-v3-turbo-fp16`, conforme [Spec E02 §8](../specs/E02_ENDPOINT_TRANSCRIPTIONS.md#8-motor-stt) |
+| `MINDVOX_TRANSCRIPTION_OUTPUT_DIR` | Pasta local do JSON tecnico da transcricao bruta | Padrao `outputs/transcriptions`; path relativo deve ser resolvido a partir da raiz do projeto |
+| `MINDVOX_TRANSCRIPTION_TEXT_OUTPUT_DIR` | Pasta local do TXT humano da transcricao bruta | Padrao `outputs/human/transcriptions`; propria do modo `dev`/instalacao local |
 
 Regras:
 
@@ -201,6 +210,12 @@ Campos:
 - `class_date`: opcional, formato `YYYY-MM-DD`;
 - `class_title`: opcional;
 - `session_label`: opcional;
+
+Limites de metadados textuais:
+
+- `course`: ate `160` caracteres;
+- `discipline`: ate `120` caracteres;
+- `class_title`: ate `200` caracteres.
 - `language`: opcional, padrao `pt-BR`.
 
 Cada campo do formulario deve ser declarado com descricao didatica propria em `File(description=...)` ou `Form(description=...)`. Essas descricoes devem aparecer no Swagger/OpenAPI em ingles e incluir exemplo curto, para que o usuario consiga compreender o que preencher sem depender de explicacao externa.
@@ -264,10 +279,11 @@ Erros que devem ser tratados:
 | Tipo de arquivo invalido | `400 Bad Request` |
 | Audio com extensao aceita mas conteudo invalido | `422 Unprocessable Entity` |
 | Arquivo maior que o limite configurado | `413 Payload Too Large` |
-| Metadados invalidos em `class_date`, `session_label` ou `language` | `422 Unprocessable Entity` |
+| Metadados invalidos em `class_date`, `session_label`, `language`, `course`, `discipline` ou `class_title` | `422 Unprocessable Entity` |
 | Token ausente | `401 Unauthorized` |
 | Token invalido | `401 Unauthorized` |
 | Header `Authorization` em formato incorreto | `401 Unauthorized` |
+| Transporte inseguro em deploy publico | `403 Forbidden` |
 | Motor de transcricao indisponivel | `503 Service Unavailable` |
 | Metodo HTTP errado | `405 Method Not Allowed` |
 | Erro interno inesperado | `500 Internal Server Error` |
@@ -304,6 +320,16 @@ Decisao de persistencia:
 - persistencia propria de logs fica adiada no MVP;
 - o plano exige logger operacional proprio apenas para eventos controlados da E02;
 - logs persistentes, agregacao, auditoria externa e observabilidade cloud devem ser tratados em Spec futura, se necessarios.
+
+Decisao de artefatos locais:
+
+- cada transcricao bruta produzida pelo STT deve gerar automaticamente `[metadados-seguros_]<transcription_id>.json` e `[metadados-seguros_]<transcription_id>.txt`;
+- por padrao o JSON tecnico fica em `outputs/transcriptions/` e o TXT humano fica em `outputs/human/transcriptions/`, ambos ignorados pelo Git;
+- o TXT humano deve ser paragrafado quando houver segmentos do STT, preservando apenas o texto bruto audivel e mantendo timestamps no JSON tecnico;
+- a escrita deve terminar com `transcription_id` opaco e pode usar prefixo humano sanitizado derivado de `class_date`, `class_title`, `session_label` ou metadado equivalente, para facilitar localizacao local da aula;
+- a escrita nao deve usar nome original de arquivo, token, path local, dado pessoal sensivel ou metadado nao sanitizado;
+- o TXT humano deve conter somente o texto bruto transcrito, sem cabecalho artificial;
+- a API nao deve retornar path absoluto local.
 
 Verificacao obrigatoria:
 
@@ -343,6 +369,9 @@ A documentacao automatica deve permitir conferir:
 8. Criar router `POST /transcriptions/v1.0.0`.
 9. Implementar autenticacao por Bearer token.
 10. Implementar rejeicao de token ausente, token invalido e header `Authorization` em formato incorreto.
+10.1. Implementar bloqueio de `dev-token` em `MINDVOX_PUBLIC_DEPLOYMENT=true`.
+10.2. Implementar rejeicao de wildcard em `MINDVOX_TRUSTED_HOSTS` quando `MINDVOX_PUBLIC_DEPLOYMENT=true`.
+10.3. Implementar exigencia de transporte seguro para E02 em deploy publico, retornando `403 Forbidden` quando a aplicacao nao receber scheme `https`.
 11. Implementar validacoes de arquivo, incluindo nome nao vazio, extensao, `content_type`, tamanho e assinatura minima de container.
 12. Implementar validacoes de metadados.
 13. Implementar tratamento de erros controlados, incluindo `500 Internal Server Error` sem vazamento sensivel.
@@ -354,10 +383,10 @@ A documentacao automatica deve permitir conferir:
 19. Criar teste de sucesso cobrindo schema, `transcription_id` com prefixo `tr_`, `language` padrao `pt-BR` quando ausente e `engine.version` conhecido ou `unknown`.
 20. Criar testes de autenticacao, incluindo token ausente, token invalido e header malformado.
 21. Criar testes de validacao de arquivo, incluindo nome de arquivo vazio com `422 Unprocessable Entity`.
-22. Criar testes de validacao de metadados, cobrindo `class_date`, `session_label` e `language` invalidos com `422 Unprocessable Entity`.
+22. Criar testes de validacao de metadados, cobrindo `class_date`, `session_label`, `language`, `course`, `discipline` e `class_title` invalidos com `422 Unprocessable Entity`.
 23. Criar teste de falha do motor de transcricao retornando `503 Service Unavailable`.
 24. Criar teste de metodo invalido.
-25. Criar teste de OpenAPI, cobrindo rota, formulario, autenticacao, resposta de sucesso, erros `400`, `401`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech.
+25. Criar teste de OpenAPI, cobrindo rota, formulario, autenticacao, resposta de sucesso, erros `400`, `401`, `403`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech.
 26. Criar teste de nao vazamento sensivel em resposta e mensagens de erro.
 27. Criar teste automatizado ou revisao documentada de nao vazamento sensivel em logs.
 28. Rodar verificacao de sintaxe.
@@ -400,7 +429,7 @@ uv run python -m unittest discover -s tests -v
 Servidor local em modo de contrato:
 
 ```bash
-MINDVOX_API_TOKEN=dev-token MINDVOX_TRANSCRIPTION_MODE=contract uv run fastapi dev src/main.py
+uv run fastapi dev src/contract
 ```
 
 Documentacao:
@@ -497,20 +526,26 @@ Este plano podera ser fechado quando:
 - o endpoint `POST /transcriptions/v1.0.0` existir;
 - o endpoint exigir Bearer token;
 - o endpoint rejeitar token ausente, token invalido e header `Authorization` em formato incorreto;
+- o endpoint usar `dev-token` quando `MINDVOX_API_TOKEN` estiver ausente ou vazio em desenvolvimento local;
+- o endpoint retornar `503 Service Unavailable` quando `MINDVOX_API_TOKEN` estiver com placeholder de exemplo;
 - o endpoint aceitar arquivo valido em modo de contrato;
 - o endpoint rejeitar arquivo ausente;
 - o endpoint rejeitar arquivo sem nome;
 - o endpoint rejeitar tipo invalido;
 - o endpoint rejeitar audio corrompido;
 - o endpoint rejeitar arquivo acima do limite;
-- o endpoint rejeitar metadados invalidos de `class_date`, `session_label` e `language`;
+- o endpoint rejeitar metadados invalidos de `class_date`, `session_label`, `language`, `course`, `discipline` e `class_title`;
 - o endpoint retornar `503 Service Unavailable` quando o motor de transcricao estiver indisponivel;
 - o endpoint tratar erro interno inesperado como `500`, sem vazamento sensivel;
 - o endpoint retornar resposta estruturada conforme a Spec E02;
 - o `transcription_id` retornar identificador opaco com prefixo `tr_`, sem dado sensivel embutido;
+- os artefatos locais usarem prefixo humano sanitizado quando houver metadados de aula e manterem o `transcription_id` opaco como sufixo obrigatorio;
 - o `language` retornar `pt-BR` como padrao quando o formulario nao informar idioma;
 - o `engine.version` retornar versao conhecida ou valor controlado como `unknown`, sem expor path local;
-- o OpenAPI documentar rota, formulario, arquivo obrigatorio, metadados opcionais, descricoes didaticas dos campos com exemplos curtos, formatos aceitos, Bearer token, resposta de sucesso, erros `400`, `401`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech;
+- `dev-token` ser recusado em deploy publico;
+- `MINDVOX_TRUSTED_HOSTS=*` ser recusado em deploy publico;
+- `POST /transcriptions/v1.0.0` exigir transporte seguro em deploy publico, retornando `403` quando a aplicacao nao receber scheme `https`;
+- o OpenAPI documentar rota, formulario, arquivo obrigatorio, metadados opcionais, descricoes didaticas dos campos com exemplos curtos, formatos aceitos, Bearer token, resposta de sucesso, erros `400`, `401`, `403`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech;
 - o plano de logs estiver cumprido ou justificado;
 - logs tiverem sido verificados contra vazamento de audio bruto, transcricao integral, `Authorization`, token, `.env`, path sensivel e dados pessoais desnecessarios;
 - houver testes automatizados da E02;

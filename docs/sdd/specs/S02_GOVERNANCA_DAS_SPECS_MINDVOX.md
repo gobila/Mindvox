@@ -173,7 +173,7 @@ Specs de endpoint devem usar o prefixo `E` seguido de dois digitos:
 ```text
 E01_ENDPOINT_HEALTH.md
 E02_ENDPOINT_TRANSCRIPTIONS.md
-E03_ENDPOINT_TRANSCRIPTS_PROCESS.md
+E03_ENDPOINT_PROCESSED_TRANSCRIPTIONS.md
 E04_ENDPOINT_SEARCH_SEMANTIC.md
 E05_ENDPOINT_SEARCH_RELATIONAL.md
 ```
@@ -217,7 +217,7 @@ docs/sdd/specs/
   S02_GOVERNANCA_DAS_SPECS_MINDVOX.md
   E01_ENDPOINT_HEALTH.md
   E02_ENDPOINT_TRANSCRIPTIONS.md
-  E03_ENDPOINT_TRANSCRIPTS_PROCESS.md
+  E03_ENDPOINT_PROCESSED_TRANSCRIPTIONS.md
   E04_ENDPOINT_SEARCH_SEMANTIC.md
   E05_ENDPOINT_SEARCH_RELATIONAL.md
 ```
@@ -230,7 +230,7 @@ Estado esperado neste momento:
 | S02 | `S02_GOVERNANCA_DAS_SPECS_MINDVOX.md` | Spec geral | `aberta` | Governar organizacao das Specs |
 | E01 | `E01_ENDPOINT_HEALTH.md` | Spec de endpoint | `fechada` | Definir endpoint de saude da API |
 | E02 | `E02_ENDPOINT_TRANSCRIPTIONS.md` | Spec de endpoint | `fechada` | Definir endpoint de transcricao |
-| E03 | `E03_ENDPOINT_TRANSCRIPTS_PROCESS.md` | Spec de endpoint | futura | Definir processamento de transcricao |
+| E03 | `E03_ENDPOINT_PROCESSED_TRANSCRIPTIONS.md` | Spec de endpoint | `aberta` | Definir pos-processamento de transcricao |
 | E04 | `E04_ENDPOINT_SEARCH_SEMANTIC.md` | Spec de endpoint | futura | Definir busca semantica |
 | E05 | `E05_ENDPOINT_SEARCH_RELATIONAL.md` | Spec de endpoint | futura | Definir busca relacional |
 

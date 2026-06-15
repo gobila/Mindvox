@@ -60,6 +60,8 @@ Consequencia obrigatoria:
 | --- | --- | --- | --- |
 | T02.01 | concluida | Criar mecanismo de configuracao externa | Configuracoes da E02 ficam concentradas em modulo proprio ou mecanismo equivalente |
 | T02.02 | concluida | Definir `MINDVOX_API_TOKEN` | Token do MVP e lido de configuracao externa e nao fica no codigo |
+| T02.02.1 | concluida | Tratar placeholder de `MINDVOX_API_TOKEN` como ausente | `replace-with-local-token` ou `<set-real-token-only-in-local-env>` nao autentica a E02 e gera erro controlado |
+| T02.02.2 | concluida | Usar token local automatico | Em desenvolvimento local, `MINDVOX_API_TOKEN` ausente ou vazio usa `dev-token` |
 | T02.03 | concluida | Definir `MINDVOX_MAX_UPLOAD_MB` | Limite de upload e configuravel, com padrao inicial coerente com `500 MB` |
 | T02.04 | concluida | Definir `MINDVOX_TRANSCRIPTION_MODE` | Modo de contrato existe apenas para testes automatizados e demonstracao controlada |
 | T02.05 | concluida | Definir `MINDVOX_TRANSCRIPTION_MODEL` | Modelo padrao previsto e `mlx-community/whisper-large-v3-turbo-fp16`, conforme [Spec E02 §8](../specs/E02_ENDPOINT_TRANSCRIPTIONS.md#8-motor-stt) e [Plano P02 §5.1](../plans/P02_IMPLEMENTACAO_E02_TRANSCRIPTIONS.md#51-clausula-de-preservacao-do-motor-stt) |
@@ -81,6 +83,10 @@ Consequencia obrigatoria:
 | T02.18 | concluida | Rejeitar token ausente | Requisicao sem `Authorization` retorna `401 Unauthorized` |
 | T02.19 | concluida | Rejeitar token invalido | Requisicao com token incorreto retorna `401 Unauthorized` |
 | T02.20 | concluida | Rejeitar header malformado | Header diferente de `Bearer <token>` retorna `401 Unauthorized` |
+| T02.20.1 | concluida | Rejeitar `dev-token` em deploy publico | Quando `MINDVOX_PUBLIC_DEPLOYMENT=true`, token didatico e tratado como ausente e nao autentica E02 |
+| T02.20.2 | concluida | Exigir transporte seguro em deploy publico | `POST /transcriptions/v1.0.0` retorna `403 Forbidden` se a aplicacao nao receber scheme `https` em modo publico |
+| T02.20.3 | concluida | Rejeitar wildcard de trusted hosts em deploy publico | `MINDVOX_TRUSTED_HOSTS=*` impede inicializacao quando `MINDVOX_PUBLIC_DEPLOYMENT=true` |
+| T02.20.4 | concluida | Exibir perfil ativo no Swagger global | `Active startup profile` informa `dev`, `contract` ou `prod` na documentacao OpenAPI |
 | T02.21 | concluida | Validar presenca de `audio_file` | Requisicao sem arquivo retorna `422 Unprocessable Entity` |
 | T02.22 | concluida | Validar nome de arquivo nao vazio | Arquivo sem nome retorna `422 Unprocessable Entity` |
 | T02.23 | concluida | Validar extensoes aceitas | Apenas `.wav` e `.m4a` sao aceitas no MVP |
@@ -89,6 +95,7 @@ Consequencia obrigatoria:
 | T02.26 | concluida | Validar conteudo minimo do audio | Arquivo com extensao aceita mas conteudo invalido retorna `422 Unprocessable Entity` |
 | T02.27 | concluida | Validar `class_date` | Valor invalido retorna `422 Unprocessable Entity`; valor informado deve seguir `YYYY-MM-DD` |
 | T02.28 | concluida | Validar `session_label` | Valor invalido retorna `422 Unprocessable Entity`; valor informado deve ser simples, explicavel e curto |
+| T02.28.1 | concluida | Limitar metadados opcionais textuais | `course` ate `160`, `discipline` ate `120` e `class_title` ate `200` caracteres; excesso retorna `422` |
 | T02.29 | concluida | Validar `language` e aplicar padrao | Valor ausente assume `pt-BR`; valor invalido retorna `422 Unprocessable Entity`; valor informado deve usar formato simples, como `pt-BR` |
 | T02.30 | concluida | Gerar `transcription_id` opaco | Identificador usa prefixo `tr_` e nao incorpora nome de arquivo, token, path local ou dado pessoal |
 | T02.31 | concluida | Tratar falha do motor | Motor indisponivel retorna `503 Service Unavailable` |
@@ -97,17 +104,26 @@ Consequencia obrigatoria:
 | T02.34 | concluida | Proibir vazamento em logs | Logs nao registram audio bruto, transcricao integral, `Authorization`, tokens, `.env`, paths sensiveis ou dados pessoais desnecessarios |
 | T02.35 | concluida | Decidir persistencia de logs | Persistencia propria e implementada ou explicitamente adiada |
 | T02.36 | concluida | Verificar logs contra vazamento sensivel | Teste automatizado ou revisao documentada confirma ausencia de audio bruto, transcricao integral, token, `.env`, path sensivel e dados pessoais desnecessarios nos logs |
-| T02.37 | concluida | Configurar documentacao FastAPI | OpenAPI exibe summary, description, formulario, formatos aceitos, Bearer token, sucesso, erros `400`, `401`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech |
+| T02.36.1 | concluida | Persistir artefatos locais da transcricao bruta | Cada sucesso do STT salva JSON tecnico em `outputs/transcriptions/` e TXT humano em `outputs/human/transcriptions/` |
+| T02.36.2 | concluida | Testar persistencia local da transcricao bruta | `test_post_transcriptions_saves_raw_transcription_artifacts` confirma JSON tecnico, TXT humano e `artifact_locations` sem path absoluto local |
+| T02.36.3 | concluida | Nomear artefatos com metadados seguros | Arquivos locais podem usar prefixo sanitizado de data/titulo/sessao e sempre terminam com `transcription_id` opaco |
+| T02.36.4 | concluida | Preservar TXT bruto auditavel | TXT humano da E02 contem somente a transcricao bruta, sem cabecalho artificial |
+| T02.36.5 | concluida | Paragrafar TXT humano da transcricao | Quando o STT fornece segmentos, o TXT humano e quebrado em paragrafos legiveis sem inserir timestamps; timestamps ficam no JSON tecnico |
+| T02.37 | concluida | Configurar documentacao FastAPI | OpenAPI exibe summary, description, formulario, formatos aceitos, Bearer token, sucesso, erros `400`, `401`, `403`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech |
 | T02.37.1 | concluida | Documentar didaticamente cada campo do formulario | `File(description=...)` e `Form(description=...)` explicam em ingles, com exemplo curto, `audio_file`, `course`, `discipline`, `class_date`, `class_title`, `session_label` e `language`, para orientar usuarios diretamente no Swagger/OpenAPI |
 | T02.38 | concluida | Criar pasta de testes da E02 | `tests/e02_transcriptions/` existe |
 | T02.39 | concluida | Criar README da pasta de testes | README explica hipoteses verificadas e comandos de execucao |
 | T02.40 | concluida | Criar teste de sucesso | Envio valido em modo de contrato retorna `200 OK`, schema esperado, `transcription_id` com prefixo `tr_`, `language` padrao `pt-BR` quando ausente e `engine.version` conhecido ou `unknown` |
 | T02.41 | concluida | Criar testes de autenticacao | Cobrir token ausente, token invalido e header malformado |
 | T02.42 | concluida | Criar testes de arquivo invalido | Cobrir arquivo ausente `422`, nome de arquivo vazio `422`, tipo invalido `400`, conteudo corrompido `422` e arquivo grande demais `413` |
-| T02.43 | concluida | Criar testes de metadados invalidos | Cobrir `class_date`, `session_label` e `language` invalidos retornando `422 Unprocessable Entity` |
+| T02.43 | concluida | Criar testes de metadados invalidos | Cobrir `class_date`, `session_label`, `language`, `course`, `discipline` e `class_title` invalidos retornando `422 Unprocessable Entity` |
+| T02.43.1 | concluida | Criar teste de placeholder de token do app | `test_post_transcriptions_rejects_placeholder_api_token_configuration` passa |
+| T02.43.2 | concluida | Criar teste de `dev-token` em deploy publico | `test_post_transcriptions_rejects_dev_token_in_public_deployment` passa |
+| T02.43.3 | concluida | Criar testes de transporte seguro em deploy publico | `test_post_transcriptions_requires_https_in_public_deployment` e `test_post_transcriptions_accepts_https_in_public_deployment` passam |
+| T02.43.4 | concluida | Criar teste de wildcard em trusted hosts | `test_public_deployment_rejects_wildcard_trusted_hosts` passa |
 | T02.44 | concluida | Criar teste de falha do motor | Indisponibilidade do motor retorna `503 Service Unavailable` |
 | T02.45 | concluida | Criar teste de metodo invalido | Metodo nao permitido na rota retorna `405 Method Not Allowed` |
-| T02.46 | concluida | Criar teste de OpenAPI | `/openapi.json` reflete rota, formulario, descricoes didaticas dos campos com exemplos curtos, seguranca, sucesso, erros `400`, `401`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech |
+| T02.46 | concluida | Criar teste de OpenAPI | `/openapi.json` reflete rota, formulario, descricoes didaticas dos campos com exemplos curtos, seguranca, sucesso, erros `400`, `401`, `403`, `413`, `422`, `500` e `503`, audio gravado e exclusao de streaming, TTS e speech-to-speech |
 | T02.47 | concluida | Criar teste de nao vazamento sensivel em resposta | Resposta e erros nao expõem token, `.env`, paths ou dados privados |
 | T02.48 | concluida | Criar teste ou revisao de nao vazamento sensivel em logs | Logs da E02 nao expõem token, `.env`, paths, audio bruto, transcricao integral ou dados pessoais desnecessarios |
 | T02.49 | concluida | Rodar verificacao de sintaxe | `py_compile` passa para arquivos da E02 e testes relacionados |
@@ -131,7 +147,7 @@ Consequencia obrigatoria:
 Verificacao de sintaxe:
 
 ```bash
-uv run python -m py_compile src/main.py src/settings.py src/routers/health.py src/routers/transcriptions.py src/schemas/transcriptions.py src/services/transcription_service.py tests/e01_health/test_health.py tests/e02_transcriptions/test_transcriptions.py
+uv run python -m py_compile src/main.py src/settings.py src/routers/health.py src/routers/endpoint_security.py src/routers/transcriptions.py src/schemas/transcriptions.py src/services/transcription_service.py tests/e01_health/test_health.py tests/e02_transcriptions/test_transcriptions.py
 ```
 
 Testes automatizados da E02:
@@ -149,7 +165,7 @@ uv run python -m unittest discover -s tests -v
 Servidor local em modo de contrato:
 
 ```bash
-MINDVOX_API_TOKEN=dev-token MINDVOX_TRANSCRIPTION_MODE=contract uv run fastapi dev src/main.py
+uv run fastapi dev src/contract
 ```
 
 Documentacao:
@@ -163,7 +179,7 @@ Prova real humana obrigatoria antes do fechamento:
 ```bash
 uv sync --extra stt
 uv run python -c "import mlx_whisper; print('mlx_whisper ok')"
-MINDVOX_API_TOKEN=dev-token MINDVOX_TRANSCRIPTION_MODE=real uv run fastapi dev src/main.py
+uv run fastapi dev src/main.py
 curl -X POST "http://127.0.0.1:8000/transcriptions/v1.0.0" \
   -H "Authorization: Bearer dev-token" \
   -F "audio_file=@/caminho/para/audio-real.wav;type=audio/wav" \
@@ -215,7 +231,9 @@ Estas tarefas poderao ser encerradas quando:
 - divergencias estiverem justificadas no documento correto;
 - os testes da E02 passarem;
 - a suite geral passar;
+- a persistencia local usar nomes humanos seguros quando houver metadados, sem perder o `transcription_id` opaco e sem poluir o TXT bruto;
 - os testes ou revisoes de metadados, OpenAPI e logs sem vazamento estiverem cobertos;
+- os testes de hardening publico compartilhado passarem, incluindo bloqueio de `dev-token`, exigencia de transporte seguro em deploy publico e rejeicao de `MINDVOX_TRUSTED_HOSTS=*`;
 - a prova real humana do endpoint tiver sido executada com sucesso;
 - o resultado da prova real humana estiver registrado;
 - a checklist da Spec E02 estiver coerente;
@@ -291,6 +309,14 @@ Prova real humana executada em `2026-06-09`:
 - resultado qualitativo: transcricao bruta real aprovada para uso como insumo da E03, com erros normais de STT em termos tecnicos e sem diarizacao final;
 - observacao de produto: a transcricao bruta e adequada para prova do que foi ouvido e para processamento posterior; limpeza, normalizacao tecnica e organizacao de alto nivel pertencem ao endpoint futuro de pos-processamento;
 - resposta analisada nao expos token, `.env`, path local sensivel, cache local ou audio bruto.
+
+Atualizacao de hardening publico em `2026-06-10`:
+
+- E02 passou a recusar `dev-token` quando `MINDVOX_PUBLIC_DEPLOYMENT=true`;
+- E02 passou a retornar `403 Forbidden` quando `POST /transcriptions/v1.0.0` for chamado em deploy publico sem que a aplicacao receba scheme `https`;
+- a aplicacao passou a recusar `MINDVOX_TRUSTED_HOSTS=*` quando `MINDVOX_PUBLIC_DEPLOYMENT=true`;
+- OpenAPI e testes da E02 foram atualizados para documentar e validar o status `403`;
+- a mudanca nao altera a prova real humana de STT ja executada, mas endurece o comportamento do endpoint em instalacao publica.
 
 Mensagem de commit sugerida:
 

@@ -103,10 +103,10 @@ Descricoes didaticas obrigatorias no OpenAPI:
 - as descricoes com exemplos devem aparecer na documentacao interativa da API para reduzir ambiguidade de uso, facilitar apresentacao tecnica e diminuir pedidos externos de explicacao;
 - as descricoes publicas dos campos devem estar em ingles, coerentes com o restante da documentacao OpenAPI do endpoint;
 - `audio_file`: `Required recorded audio file to be transcribed. Supported formats are .wav and .m4a. Example: class-2026-06-09.wav.`;
-- `course`: `Optional name of the course or broader learning context. Use it to organize the transcription after it is generated. Example: Postgraduate course at Federal University of Goias.`;
-- `discipline`: `Optional name of the discipline, subject, or class area related to the audio. Example: API Engineering for AI.`;
+- `course`: `Optional name of the course or broader learning context. Use it to organize the transcription after it is generated. Example: Postgraduate course at Federal University of Goias. Maximum: 160 characters.`;
+- `discipline`: `Optional name of the discipline, subject, or class area related to the audio. Example: API Engineering for AI. Maximum: 120 characters.`;
 - `class_date`: `Optional date of the class. Use the YYYY-MM-DD format. Example: 2026-06-09.`;
-- `class_title`: `Optional title, topic, or human-readable identification of the class. It helps identify the transcription later. Example: Introduction to API contracts.`;
+- `class_title`: `Optional title, topic, or human-readable identification of the class. It helps identify the transcription later. Example: Introduction to API contracts. Maximum: 200 characters.`;
 - `session_label`: `Optional short identifier for the recording session. Use a simple value. Example: class-01.`;
 - `language`: `Expected language of the audio. For Brazilian Portuguese, use pt-BR. Example: pt-BR.`;
 - o teste de OpenAPI deve bloquear remocao futura dessas explicacoes.
@@ -122,6 +122,9 @@ Validacoes minimas:
 - o arquivo deve ter extensao aceita pelo MVP e `content_type` compativel com audio;
 - o arquivo nao deve exceder o limite maximo definido para o MVP;
 - `class_date`, quando informado, deve usar formato `YYYY-MM-DD`;
+- `course`, quando informado, deve ter ate `160` caracteres;
+- `discipline`, quando informado, deve ter ate `120` caracteres;
+- `class_title`, quando informado, deve ter ate `200` caracteres;
 - `session_label`, quando informado, deve aceitar valores simples e explicaveis, como `s1`, `s2`, `s3`, `s4` ou texto curto equivalente;
 - `language`, quando informado, deve usar formato simples, como `pt-BR`.
 
@@ -275,6 +278,9 @@ Campos:
 | `segments[].speaker_label` | Identificacao opcional de falante, quando diarizacao futura estiver disponivel |
 | `metadata` | Metadados recebidos e normalizados |
 | `engine` | Informacao controlada sobre o motor usado |
+| `artifact_locations` | Caminhos relativos dos artefatos gerados, sem expor path absoluto local |
+| `artifact_locations.human_text_path` | Caminho relativo do `.txt` humano da transcricao bruta |
+| `artifact_locations.technical_json_path` | Caminho relativo do JSON tecnico da transcricao |
 
 Regra de seguranca:
 
@@ -290,6 +296,22 @@ Regras de estabilidade do contrato:
 - quando o motor devolver timestamps, `segments` deve conter os trechos temporais;
 - quando timestamps nao estiverem disponiveis, `segments` pode ser uma lista vazia;
 - `speaker_label` deve existir nos segmentos e pode permanecer `null` ate que haja diarizacao real.
+
+Artefatos locais obrigatorios:
+
+- toda transcricao bruta produzida pelo STT deve salvar o JSON tecnico em `outputs/transcriptions/`, salvo configuracao diferente por `MINDVOX_TRANSCRIPTION_OUTPUT_DIR`;
+- toda transcricao bruta produzida pelo STT deve salvar o texto humano em `outputs/human/transcriptions/`, salvo configuracao diferente por `MINDVOX_TRANSCRIPTION_TEXT_OUTPUT_DIR`;
+- devem ser gerados dois arquivos por `transcription_id`: `[metadados-seguros_]<transcription_id>.json`, com a resposta estruturada da E02, e `[metadados-seguros_]<transcription_id>.txt`, com o texto bruto em pasta humana propria;
+- o `.txt` humano deve permanecer sem cabecalho artificial e sem resumo editorial, mas deve ser paragrafado quando houver segmentos do STT, evitando arquivo de linha unica insustentavel para leitura humana;
+- timestamps e segmentacao detalhada devem permanecer no JSON tecnico, para nao poluir o `.txt` usado como `raw_text_file` posterior da E03;
+- quando existirem `class_date`, `class_title`, `session_label` ou metadado equivalente, o nome do arquivo pode usar prefixo humano sanitizado para facilitar localizacao da aula, mas deve terminar com o `transcription_id` opaco;
+- o nome do arquivo nao deve incorporar nome original de arquivo, token, path local, dado pessoal sensivel ou metadado nao sanitizado;
+- o conteudo do `.txt` humano deve permanecer somente o texto bruto transcrito, sem cabecalho ou titulo artificial, para preservar auditabilidade;
+- quando os diretorios forem relativos, o path deve ser resolvido a partir da raiz do projeto, mesmo que o servidor seja iniciado de dentro de `src`;
+- `outputs/` deve permanecer fora do Git, porque pode conter transcricoes reais e dados sensiveis;
+- a resposta publica nao deve expor path absoluto local;
+- a resposta deve indicar `artifact_locations.human_text_path` e `artifact_locations.technical_json_path` para o usuario tecnico local encontrar o resultado no Swagger;
+- essa estrategia de pasta local e propria do modo `dev`/instalacao local; em producao publica, usuario final nao acessa o filesystem do servidor e a evolucao correta e endpoint/interface de download.
 
 ---
 
@@ -445,6 +467,28 @@ Uso:
 - quando `session_label` informado nao for simples, explicavel e curto;
 - quando `language` informado nao seguir formato simples, como `pt-BR`.
 
+### 10.9 Transporte Inseguro em Deploy Publico
+
+Status:
+
+```text
+403 Forbidden
+```
+
+Resposta exemplo:
+
+```json
+{
+  "detail": "HTTPS is required for public deployment."
+}
+```
+
+Uso:
+
+- quando `MINDVOX_PUBLIC_DEPLOYMENT=true`;
+- quando `POST /transcriptions/v1.0.0` for chamado sem que a aplicacao receba `request.url.scheme == "https"`;
+- quando a requisicao chegar ao endpoint protegido por transporte que nao atende a regra publica de seguranca.
+
 ---
 
 ## 11. Seguranca
@@ -464,10 +508,22 @@ Autenticacao:
 - o E02 deve exigir autenticacao desde o MVP;
 - a forma inicial deve ser `Authorization: Bearer <token>`;
 - o token do MVP deve ser lido de configuracao externa, com nome inicial `MINDVOX_API_TOKEN`;
+- em desenvolvimento local (`MINDVOX_PUBLIC_DEPLOYMENT=false`), `MINDVOX_API_TOKEN` ausente ou vazio deve usar automaticamente o token didatico `dev-token`;
+- placeholder de exemplo, como `replace-with-local-token` ou `<set-real-token-only-in-local-env>`, deve ser tratado como token ausente;
+- `dev-token` so e permitido como token didatico local; em `MINDVOX_PUBLIC_DEPLOYMENT=true`, deve ser tratado como token ausente;
+- o Swagger/OpenAPI global deve informar `Active startup profile`, indicando `dev`, `contract` ou `prod`;
 - o token nao deve ser gravado no codigo-fonte, em logs, em mensagens de erro ou em exemplos reais;
 - o uso de `.env`, variaveis de ambiente, `BaseSettings`, `os.environ` ou mecanismo equivalente deve manter segredos fora do codigo versionado;
 - requisicoes sem token, com token invalido ou com formato incorreto devem receber `401 Unauthorized`;
 - antes de qualquer exposicao em rede, acesso externo ou uso multiusuario, uma spec propria devera definir autenticacao, autorizacao, limites de uso e protecoes contra abuso.
+
+Endurecimento publico:
+
+- em `MINDVOX_PUBLIC_DEPLOYMENT=true`, `MINDVOX_TRUSTED_HOSTS` e obrigatorio e nao pode conter `*`;
+- em `MINDVOX_PUBLIC_DEPLOYMENT=true`, `POST /transcriptions/v1.0.0` deve exigir transporte seguro;
+- a checagem de transporte seguro deve aceitar apenas requisicao que chegue a aplicacao com scheme `https`;
+- se TLS terminar em proxy, o proxy e o servidor ASGI devem ser configurados de modo confiavel para repassar o scheme `https`; a aplicacao nao deve confiar em header `X-Forwarded-Proto` enviado livremente pelo cliente;
+- essa checagem nao substitui TLS, rate limiting, limite de corpo e bloqueio de acesso direto ao processo ASGI na camada de deploy.
 
 Horizonte de seguranca:
 
@@ -515,7 +571,7 @@ A documentacao automatica deve mostrar:
 - descricao didatica propria com exemplo curto para cada campo do formulario, visivel na documentacao interativa;
 - formatos de arquivo aceitos;
 - resposta de sucesso;
-- erros principais: `400`, `401`, `413`, `422`, `500` e `503`;
+- erros principais: `400`, `401`, `403`, `413`, `422`, `500` e `503`;
 - esquema de autenticacao por `Bearer token`;
 - indicacao de que o audio deve ser arquivo ja gravado;
 - indicacao de que streaming, TTS e speech-to-speech estao fora deste endpoint.
@@ -552,7 +608,7 @@ O endpoint podera ser considerado pronto quando:
 - a API rejeitar tipo de arquivo invalido;
 - a API rejeitar arquivo com extensao aceita mas conteudo invalido ou corrompido;
 - a API rejeitar arquivo acima do limite definido;
-- a API rejeitar metadados invalidos em `class_date`, `session_label` ou `language`;
+- a API rejeitar metadados invalidos em `class_date`, `session_label`, `language`, `course`, `discipline` ou `class_title`;
 - a resposta de sucesso seguir schema estruturado;
 - a resposta de sucesso retornar `transcription_id` opaco com prefixo `tr_`;
 - a resposta de sucesso aplicar `pt-BR` como padrao quando `language` estiver ausente;
@@ -705,7 +761,7 @@ Interpretacao:
 | Campos da resposta descritos | [x] | Campos documentados em tabela |
 | Ausencia de dados sensiveis verificada | [x] | Spec proibe paths locais, chaves, tokens e detalhes sensiveis de infraestrutura |
 | Schema de resposta definido | [x] | Modelos Pydantic criados em `src/schemas/transcriptions.py` |
-| Erros principais listados | [x] | `422`, `400`, `413`, `401`, `503` e `500` descritos; `405` tratado separadamente como metodo HTTP invalido |
+| Erros principais listados | [x] | `422`, `400`, `401`, `403`, `413`, `503` e `500` descritos; `405` tratado separadamente como metodo HTTP invalido |
 | Status codes de erro definidos | [x] | Cada erro previsivel tem status HTTP planejado |
 | Mensagens de erro sem vazamento sensivel | [x] | Spec proibe stack trace, caminhos locais, audio integral e configuracoes privadas |
 | Metodo HTTP invalido considerado | [x] | Teste cobre `GET /transcriptions/v1.0.0` retornando `405` |
@@ -714,7 +770,10 @@ Interpretacao:
 | Necessidade de autorizacao decidida | [x] | Autorizacao fina adiada; token unico do MVP protege o endpoint |
 | Dados sensiveis identificados | [x] | Audio, transcricao, metadados academicos, token e configuracoes tratados como sensiveis |
 | Regras de nao vazamento descritas | [x] | Regras de seguranca e logs definidas |
-| Uso de `.env`, tokens ou configuracao externa definido | [x] | `MINDVOX_API_TOKEN` e `MINDVOX_MAX_UPLOAD_MB` previstos |
+| Uso de `.env`, tokens ou configuracao externa definido | [x] | `MINDVOX_API_TOKEN` e `MINDVOX_MAX_UPLOAD_MB` previstos; token local vazio usa `dev-token`; placeholder de token deve ser tratado como ausente |
+| Token didatico bloqueado em deploy publico | [x] | `dev-token` nao autentica quando `MINDVOX_PUBLIC_DEPLOYMENT=true` |
+| Transporte seguro exigido em deploy publico | [x] | `POST /transcriptions/v1.0.0` retorna `403` quando a aplicacao nao recebe scheme `https` em modo publico |
+| Trusted hosts sem wildcard em deploy publico | [x] | `MINDVOX_TRUSTED_HOSTS=*` impede inicializacao quando `MINDVOX_PUBLIC_DEPLOYMENT=true` |
 | Eventos permitidos em log descritos | [x] | Inicio da requisicao, tamanho, content type, duracao, sucesso/falha e codigo controlado |
 | Dados proibidos em log descritos | [x] | Audio bruto, transcricao integral, `Authorization`, tokens, `.env`, paths e dados pessoais desnecessarios |
 | Logs existentes do servidor considerados | [x] | Logs do servidor sao insuficientes para todo o E02, mas contam como base operacional |
@@ -722,7 +781,7 @@ Interpretacao:
 | Persistencia de logs decidida | [x] | Persistencia propria adiada; o MVP usa logs operacionais do processo/servidor |
 | `summary` definido | [x] | `Transcribe audio file` |
 | `description` definida | [x] | `Receives a recorded audio file and returns a text transcription with optional class metadata.` |
-| Respostas principais aparecem na documentacao | [x] | Teste de OpenAPI valida respostas `200`, `400`, `401`, `413`, `422`, `500` e `503` |
+| Respostas principais aparecem na documentacao | [x] | Teste de OpenAPI valida respostas `200`, `400`, `401`, `403`, `413`, `422`, `500` e `503` |
 | Parametros/body aparecem corretamente | [x] | Teste de OpenAPI valida `requestBody` multipart |
 | Descricoes didaticas dos campos aparecem na documentacao | [x] | Teste de OpenAPI valida descricoes publicas em ingles, com exemplos curtos, para `audio_file`, `course`, `discipline`, `class_date`, `class_title`, `session_label` e `language` |
 | `/openapi.json` reflete o contrato aprovado | [x] | Coberto por teste automatizado da E02 |
@@ -739,7 +798,7 @@ Interpretacao:
 | Teste automatizado de sucesso criado | [x] | Teste cobre envio valido em modo `contract`, schema, `transcription_id`, `language` padrao e `engine.version` |
 | Teste automatizado de erro principal criado | [x] | Testes cobrem ausencia de arquivo, nome de arquivo vazio, tipo invalido, audio corrompido, arquivo grande, metadados invalidos, token e falha do motor |
 | Teste automatizado de metodo invalido criado | [x] | Teste cobre `GET /transcriptions/v1.0.0` |
-| Teste automatizado do OpenAPI criado | [x] | Teste valida `summary`, `description`, formulario, autenticacao e respostas `400`, `401`, `413`, `422`, `500` e `503` |
+| Teste automatizado do OpenAPI criado | [x] | Teste valida `summary`, `description`, formulario, autenticacao e respostas `400`, `401`, `403`, `413`, `422`, `500` e `503` |
 | Comando de teste registrado | [x] | Comandos registrados no README da pasta de testes |
 | Todos os testes passam antes do proximo endpoint | [x] | Suite geral executada com 28 testes passando |
 | Teste funcional manual real executado e registrado | [x] | Prova real humana executada em `2026-06-09` com `MINDVOX_TRANSCRIPTION_MODE=real`, audio real de aula, retorno `200 OK`, `engine.name` igual a `mlx-whisper` e modelo `mlx-community/whisper-large-v3-turbo-fp16` |
@@ -748,7 +807,8 @@ Interpretacao:
 | Exemplo de falha relevante documentado | [x] | Testes invalidos descritos nesta Spec |
 | Endpoint demonstrado com entrada real representativa | [x] | Audio real de aula com `duration_seconds` igual a `3093.6`, texto nao vazio, coerente e segmentado |
 | Endpoint explicavel por finalidade, entrada, processamento, saida, erro e teste | [x] | Spec descreve o fluxo completo esperado |
-| Limites de escopo claros | [x] | Streaming, TTS, processamento semantico, persistencia, busca e diarizacao final adiados |
+| Persistencia local da transcricao bruta definida | [x] | Cada STT gera JSON tecnico em `outputs/transcriptions/[metadados-seguros_]<transcription_id>.json` e texto humano em `outputs/human/transcriptions/[metadados-seguros_]<transcription_id>.txt`, sem expor path absoluto na resposta |
+| Limites de escopo claros | [x] | Streaming, TTS, processamento semantico, persistencia definitiva em banco/memoria, busca e diarizacao final adiados |
 | `git status` revisado | [x] | Revisado; mudancas pertencem a E02 e configuracao/documentacao diretamente associada |
 | `git diff` revisado | [x] | Revisado; diff tracked inclui `.gitignore`, README, Spec E02, Governanca S02 e `src/main.py` |
 | Arquivos alterados pertencem ao escopo da E02 ou estao justificados | [x] | Escopo inclui endpoint, schemas, servico, settings, testes, README, `.env.example` e ajuste de `.gitignore` |
@@ -817,7 +877,7 @@ OK
 Exemplo de requisicao manual em modo de contrato:
 
 ```bash
-MINDVOX_API_TOKEN=dev-token MINDVOX_TRANSCRIPTION_MODE=contract uv run fastapi dev src/main.py
+uv run fastapi dev src/contract
 curl -X POST "http://127.0.0.1:8000/transcriptions/v1.0.0" \
   -H "Authorization: Bearer dev-token" \
   -F "audio_file=@/caminho/para/audio.wav;type=audio/wav" \
@@ -831,7 +891,7 @@ Teste manual real bloqueante antes do commit:
 ```bash
 uv sync --extra stt
 uv run python -c "import mlx_whisper; print('mlx_whisper ok')"
-MINDVOX_API_TOKEN=dev-token MINDVOX_TRANSCRIPTION_MODE=real uv run fastapi dev src/main.py
+uv run fastapi dev src/main.py
 curl -X POST "http://127.0.0.1:8000/transcriptions/v1.0.0" \
   -H "Authorization: Bearer dev-token" \
   -F "audio_file=@/caminho/para/audio-real.wav;type=audio/wav" \

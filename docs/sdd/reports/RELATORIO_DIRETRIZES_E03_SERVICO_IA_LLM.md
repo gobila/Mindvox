@@ -4,14 +4,18 @@
 
 - `Tipo`: Relatorio tecnico orientador
 - `Status`: orientador, nao normativo
-- `Data`: 2026-06-08
-- `Escopo`: consolidar a interpretacao dos requisitos academicos sobre endpoints de IA e orientar a futura E03
+- `Data original`: 2026-06-08
+- `Atualizacao`: 2026-06-09
+- `Escopo`: consolidar a interpretacao dos requisitos academicos sobre endpoints de IA e alinhar a E03 ao estado atual do Mindvox
 - `Documentos relacionados`:
   - `docs/sdd/specs/S01_CONSTITUICAO_E_INVARIANTES_MINDVOX.md`
   - `docs/sdd/specs/S02_GOVERNANCA_DAS_SPECS_MINDVOX.md`
   - `docs/sdd/specs/E02_ENDPOINT_TRANSCRIPTIONS.md`
+  - `docs/sdd/specs/E03_ENDPOINT_PROCESSED_TRANSCRIPTIONS.md`
   - `docs/sdd/plans/P02_IMPLEMENTACAO_E02_TRANSCRIPTIONS.md`
   - `docs/sdd/tasks/T02_TAREFAS_IMPLEMENTACAO_E02_TRANSCRIPTIONS.md`
+  - `docs/sdd/reports/RELATORIO_ARQUITETURA_E_ESCOPO_E03_E05.md`
+  - `docs/sdd/reports/RELATORIO_BENCHMARK_E03_MODELOS_LLM.md`
 
 ---
 
@@ -19,9 +23,13 @@
 
 Este relatorio consolida a decisao tecnica sobre como o Mindvox deve interpretar a exigencia academica de possuir pelo menos dois endpoints de Inteligencia Artificial.
 
-O objetivo e evitar perda contextual antes da criacao da E03.
+O objetivo original era evitar perda contextual antes da criacao da E03.
 
-Este relatorio nao cria contrato de endpoint por si so. Conforme a S02, ele deve orientar uma futura Spec de endpoint ou uma emenda de governanca, caso Adalberto aprove a diretriz.
+Com a atualizacao de 2026-06-09, este relatorio passa a registrar tambem a evolucao do projeto apos a prova real da E02 e apos a criacao da Spec E03.
+
+Este relatorio nao cria contrato de endpoint por si so. Conforme a S02, ele deve orientar a Spec de endpoint aplicavel ou uma emenda de governanca, caso o autor do projeto aprove a diretriz.
+
+No estado atual do projeto, a Spec E03 ja foi aberta em `E03_ENDPOINT_PROCESSED_TRANSCRIPTIONS.md`. Portanto, sugestoes antigas de nome, rota e contrato devem ser lidas como historico de decisao, nao como alternativas ainda concorrentes.
 
 ---
 
@@ -104,15 +112,26 @@ Conclusao:
 
 - pode ser apresentado como primeiro servico de IA;
 - nao e LLM, mas continua sendo endpoint de IA;
-- deve ser demonstrado com clareza como servico de transcricao automatica.
+- foi validado em prova real humana com transcricao longa, resposta `200 OK`, motor `mlx-whisper` e modelo `mlx-community/whisper-large-v3-turbo-fp16`;
+- deve ser demonstrado com clareza como servico de transcricao automatica bruta.
 
-### 5.3 Lacuna Academica Restante
+### 5.3 Estado Atual da E03
 
-Apos a E02, ainda falta um segundo endpoint de IA para atender com seguranca ao criterio academico.
+Apos a E02, a lacuna academica restante foi direcionada para a E03.
 
-Esse segundo endpoint deve executar uma operacao diferente da E02.
+A Spec E03 atual define:
 
-Nao basta criar outra rota de transcricao, pois o enunciado exige servicos que realizem operacoes diferentes.
+- `POST /processed-transcriptions/v1.0.0`;
+- pos-processamento de alto nivel;
+- entrada por audio ou texto bruto;
+- reaproveitamento interno do servico de transcricao quando receber audio;
+- saida com texto bruto, texto didatico, temas, termos tecnicos e metadados.
+
+Conclusao:
+
+- a lacuna conceitual de segundo endpoint de IA esta enderecada em Spec;
+- a lacuna de implementacao permanece aberta ate a E03 ser codificada, testada e validada por prova real humana;
+- nao basta criar outra rota de transcricao, pois o segundo servico deve executar operacao diferente da E02.
 
 ---
 
@@ -136,50 +155,41 @@ Essa escolha e tecnicamente coerente com o produto, pois o Mindvox depende prime
 
 ---
 
-## 7. Escopo Funcional Recomendado para a E03
+## 7. Escopo Funcional Atual da E03
 
-A E03 deve receber texto de aula ou transcricao e devolver uma analise didatica estruturada.
+A E03 deve receber audio ou transcricao bruta e devolver uma transcricao pos-processada.
 
-Nome possivel da Spec:
-
-```text
-E03_ENDPOINT_LESSON_NOTES.md
-```
-
-Nome alternativo:
+Spec atual:
 
 ```text
-E03_ENDPOINT_TRANSCRIPT_ANALYSIS.md
+E03_ENDPOINT_PROCESSED_TRANSCRIPTIONS.md
 ```
 
-Rota possivel:
+Rota atual:
 
 ```text
-POST /lesson-notes/v1.0.0
+POST /processed-transcriptions/v1.0.0
 ```
 
-Rota alternativa:
+Operacoes atuais:
 
-```text
-POST /transcriptions/analysis/v1.0.0
-```
-
-Operacoes possiveis:
-
-- gerar resumo didatico;
-- extrair topicos principais;
-- listar conceitos-chave;
-- apontar duvidas provaveis de estudante;
-- gerar glossario inicial;
-- sugerir roteiro de revisao;
-- classificar o nivel ou tipo do conteudo, se for util.
+- receber `input_type=audio` ou `input_type=raw_text`;
+- quando receber audio, usar internamente o servico de transcricao da E02;
+- preservar `raw_text` como rastreabilidade do que foi ouvido ou enviado;
+- produzir `didactic_text`;
+- organizar conteudo por `themes`;
+- apontar `technical_terms` normalizados ou provaveis;
+- listar `technology_mentions` efetivamente citadas ou fortemente indicadas no bruto;
+- registrar `processing_notes` controladas sobre correcoes, incertezas e cuidados;
+- devolver metadados e informacao do motor de pos-processamento.
 
 Recomendacao pragmatica:
 
 - evitar escopo grande demais;
 - escolher uma resposta estruturada simples e demonstravel;
 - nao implementar agente complexo nesta fase;
-- nao implementar memoria, busca, embeddings ou banco na E03, salvo decisao expressa em Spec propria.
+- nao implementar memoria, busca, embeddings ou banco na E03;
+- deixar ingestao em memoria para E04 e recuperacao de informacao para E05.
 
 ---
 
@@ -241,66 +251,117 @@ Variaveis possiveis:
 
 | Variavel | Finalidade |
 | --- | --- |
-| `MINDVOX_LLM_MODE` | Define `local`, `provider` ou `contract` |
+| `MINDVOX_POSTPROCESSING_MODE` | Define `contract`, `provider` ou `local` |
 | `MINDVOX_LLM_PROVIDER` | Define `openai`, `groq`, `anthropic` ou outro provider suportado |
 | `MINDVOX_LLM_MODEL` | Define o modelo usado |
 | `MINDVOX_LLM_API_KEY` | Chave do provider externo, quando aplicavel |
 | `MINDVOX_LLM_BASE_URL` | URL base opcional para providers compativeis |
+| `MINDVOX_LLM_ALLOWED_PROVIDER_HOSTS` | Allowlist opcional de hostnames externos aceitos em modo `provider`; recomendada e obrigatoria em deploy publico |
+| `MINDVOX_LLM_MAX_OUTPUT_TOKENS` | Limite maximo de saida solicitado ao motor textual; padrao local da E03: `20000` |
 | `MINDVOX_LLM_TIMEOUT_SECONDS` | Timeout maximo de chamada |
-| `MINDVOX_LLM_MAX_INPUT_CHARS` | Limite de entrada textual |
+| `MINDVOX_LLAMA_SERVER_CTX_SIZE` | Contexto do `llama-server` local; padrao local da E03: `65536` |
+| `MINDVOX_LLAMA_SERVER_PARALLEL` | Slots do `llama-server` local; padrao local da E03: `1` |
+| `MINDVOX_POSTPROCESSING_MAX_INPUT_CHARS` | Limite de entrada textual; padrao local da E03: `150000` |
 
 Regras:
 
 - `.env` real deve permanecer fora do Git;
 - `.env.example` deve conter nomes e exemplos ficticios;
 - nenhuma chave real deve aparecer em testes, README, logs ou mensagens de erro;
-- o modo `contract` deve ser explicitamente identificado na resposta.
+- chave vazia ou placeholder de exemplo, como `replace-with-provider-key`, deve ser tratado como chave ausente em modo `provider`;
+- em modo `provider`, host fora de `MINDVOX_LLM_ALLOWED_PROVIDER_HOSTS` deve ser rejeitado quando a allowlist estiver configurada;
+- em deploy publico, `MINDVOX_PUBLIC_DEPLOYMENT=true` deve exigir host confiavel e docs desabilitados por padrao no app;
+- o modo `contract` deve ser explicitamente identificado na resposta;
+- em modo `provider`, o conteudo de `raw_text` ou a transcricao gerada a partir de audio sera enviado ao provider externo configurado;
+- modo `local` deve ser preferido quando o conteudo nao puder sair da maquina.
+- em modo `local`, a decisao tecnica atual e usar contexto `65536`, saida maxima `20000`, timeout `1200s` e `parallel 1`, pois a prioridade da E03 e preservacao semantica de aula de ate aproximadamente duas horas.
 
 ---
 
 ## 11. Contrato de Resposta Recomendado para a E03
 
-Resposta de sucesso recomendada:
+Resposta de sucesso recomendada, alinhada com a Spec E03 atual:
 
 ```json
 {
-  "analysis_id": "an_20260608T120000Z_ab12cd34",
-  "summary": "Resumo didatico curto.",
-  "key_points": [
-    "Ponto principal 1",
-    "Ponto principal 2"
-  ],
-  "concepts": [
+  "processed_transcription_id": "ptr_20260609T000000Z_ab12cd34",
+  "input_type": "audio",
+  "language": "pt-BR",
+  "raw_text": "...",
+  "didactic_text": "...",
+  "themes": [
     {
-      "term": "API",
-      "definition": "Interface para comunicacao entre sistemas."
+      "title": "API First",
+      "summary": "...",
+      "key_points": ["..."]
     }
   ],
-  "study_questions": [
-    "Qual problema este endpoint resolve?"
+  "technical_terms": [
+    {
+      "term": "REST",
+      "normalized_from": ["GRASH"],
+      "confidence": "medium"
+    }
+  ],
+  "technology_mentions": [
+    {
+      "name": "FastAPI",
+      "category": "framework",
+      "context": "citado como framework Python para criacao de APIs",
+      "importance": "high",
+      "normalized_from": ["fast api"],
+      "confidence": "high",
+      "evidence": "..."
+    }
+  ],
+  "processing_notes": [
+    {
+      "type": "normalization",
+      "message": "Correcao ou incerteza registrada sem expor prompt integral."
+    }
   ],
   "metadata": {
-    "source": "transcription",
-    "language": "pt-BR"
+    "course": "Pos-UFG-T2-Agentes_inteligentes_IA",
+    "discipline": "API",
+    "class_date": "2026-05-16",
+    "class_title": "apifirst_fastapi_dev",
+    "session_label": "S02"
   },
-  "engine": {
-    "type": "llm",
-    "provider": "contract",
-    "model": "contract",
-    "version": "unknown"
+  "source": {
+    "input_origin": "audio",
+    "raw_text_origin": "generated_by_transcription_service",
+    "transcription": {
+      "transcription_id": "tr_...",
+      "duration_seconds": 3093.6,
+      "segments_count": 2067,
+      "transcription_engine": {
+        "name": "mlx-whisper",
+        "model": "mlx-community/whisper-large-v3-turbo-fp16",
+        "version": "unknown"
+      }
+    }
+  },
+  "processing_engine": {
+    "name": "contract-processor",
+    "model": "contract-mode",
+    "version": "contract-mode"
   }
 }
 ```
 
 Campos importantes:
 
-- `analysis_id`: identificador opaco com prefixo controlado;
-- `summary`: resumo didatico;
-- `key_points`: topicos principais;
-- `concepts`: conceitos e definicoes;
-- `study_questions`: perguntas para estudo;
+- `processed_transcription_id`: identificador opaco com prefixo controlado;
+- `input_type`: indica se a entrada principal foi audio ou texto bruto;
+- `raw_text`: texto bruto recebido ou produzido pela transcricao;
+- `didactic_text`: texto discursivo, sequencial, logico e didatico, com redundancias semanticas enxugadas;
+- `themes`: organizacao tematica da aula;
+- `technical_terms`: termos tecnicos normalizados ou sugeridos;
+- `technology_mentions`: tecnologias, ferramentas, frameworks, plataformas, bibliotecas, servicos, APIs ou providers citados na aula;
+- `processing_notes`: notas controladas sobre correcoes, incertezas e escolhas de processamento;
 - `metadata`: metadados normalizados;
-- `engine`: informacao controlada sobre o motor, sem segredo ou path sensivel.
+- `source`: rastreabilidade da entrada e, quando aplicavel, da transcricao;
+- `processing_engine`: informacao controlada sobre o motor, sem segredo ou path sensivel.
 
 ---
 
@@ -322,12 +383,12 @@ Erros previsiveis:
 | --- | --- |
 | Texto ausente | `422 Unprocessable Entity` |
 | Texto vazio | `422 Unprocessable Entity` |
-| Texto grande demais | `413 Payload Too Large` ou `422 Unprocessable Entity`, conforme decisao da Spec |
+| Texto grande demais | `413 Payload Too Large` |
 | Token ausente | `401 Unauthorized` |
 | Token invalido | `401 Unauthorized` |
 | Header malformado | `401 Unauthorized` |
 | Provider/modelo indisponivel | `503 Service Unavailable` |
-| Timeout de provider | `503 Service Unavailable` ou `504 Gateway Timeout`, conforme decisao da Spec |
+| Timeout de provider ou servidor local | `504 Gateway Timeout` |
 | Erro interno inesperado | `500 Internal Server Error` |
 
 ---
@@ -372,13 +433,7 @@ Logs proibidos:
 A E03 deve ter pasta propria:
 
 ```text
-tests/e03_lesson_notes/
-```
-
-Ou, se a Spec adotar outro nome:
-
-```text
-tests/e03_transcript_analysis/
+tests/e03_processed_transcriptions/
 ```
 
 Testes minimos:
@@ -388,6 +443,8 @@ Testes minimos:
 - autenticacao ausente;
 - token invalido;
 - header malformado;
+- entrada principal ausente;
+- audio e texto enviados ao mesmo tempo;
 - texto ausente;
 - texto vazio;
 - texto grande demais;
@@ -423,24 +480,24 @@ Explicacao para o professor:
 
 ---
 
-## 16. Decisao Recomendada
+## 16. Decisao Atual
 
-Recomenda-se que a proxima Spec de endpoint seja:
+A decisao atual e que a Spec E03 seja:
 
 ```text
-E03_ENDPOINT_LESSON_NOTES.md
+E03_ENDPOINT_PROCESSED_TRANSCRIPTIONS.md
 ```
 
-Com rota inicial:
+Com rota:
 
 ```text
-POST /lesson-notes/v1.0.0
+POST /processed-transcriptions/v1.0.0
 ```
 
 Finalidade:
 
 ```text
-Receber texto de aula ou transcricao e devolver uma analise didatica estruturada usando LLM ou motor substituivel.
+Receber audio ou transcricao bruta e devolver transcricao pos-processada usando LLM ou motor substituivel.
 ```
 
 Essa decisao atende simultaneamente:
@@ -450,12 +507,13 @@ Essa decisao atende simultaneamente:
 - ao principio local-first;
 - ao risco de execucao em outro computador;
 - ao contrato didatico de nao iniciar endpoint sem Spec, Plano e Tarefas.
+- a arquitetura E03-E05, que reserva memoria e busca para endpoints futuros.
 
 ---
 
 ## 17. Pendencias para Governanca
 
-Este relatorio deve alimentar uma emenda futura na S02 ou uma nova regra transversal, se aprovado.
+Este relatorio ja alimentou a abertura da Spec E03 e deve continuar servindo como documento orientador.
 
 Pontos a converter em governanca:
 
@@ -464,16 +522,26 @@ Pontos a converter em governanca:
 - modelo instalado ou citado nao conta sem rota de API funcional;
 - endpoints de IA devem ter modo de contrato para testes perenes;
 - endpoints que dependam de provider externo devem documentar variaveis de ambiente e ausencia de chave real no Git;
-- antes de iniciar E03, deve haver Spec, Plano e Tarefas proprias.
+- antes de iniciar implementacao de E03, deve haver Spec, Plano e Tarefas proprias;
+- antes de fechar E03, deve haver prova real humana, conforme regra ja incorporada a governanca documental.
 
 ---
 
 ## 18. Conclusao
 
-A E02 pode ser defendida como primeiro endpoint de IA por executar STT.
+A E02 pode ser defendida como primeiro endpoint de IA por executar STT real.
 
-Ainda e necessario criar uma E03 para atender com seguranca ao requisito academico de dois endpoints de IA.
+A E03 ja foi aberta para atender com seguranca ao requisito academico de dois endpoints de IA.
 
-A melhor escolha tecnica e academica e uma E03 de analise didatica de transcricoes por LLM ou motor substituivel, mantendo local-first e prevendo provider externo opcional.
+A melhor escolha tecnica e academica, no estado atual do Mindvox, e uma E03 de pos-processamento de transcricoes por LLM ou motor substituivel, mantendo local-first e prevendo provider externo opcional.
 
-Este relatorio deve ser usado como base para a Spec E03, sem substituir a criacao formal da Spec, do Plano e das Tarefas.
+Atualizacao posterior de benchmark:
+
+- o modelo local preferencial da E03 passou a ser `Qwen3.6-35B-A3B-MTP-Q8.gguf`;
+- a decisao foi tomada apos comparacao real com Gemma 4 12B Q8 e Qwen 3.6 27B Q8;
+- a saida principal da E03 deve ser didatica e semanticamente organizada, removendo apenas redundancia semantica e ruido de fala;
+- a resposta publica da E03 deve preservar cinco entregas: `raw_text`, `didactic_text`, `themes`, `technical_terms` e `technology_mentions`;
+- `corrected_full_text` quase integral nao deve ser requisito padrao, pois a E02 ja preserva o bruto para conferencia;
+- a fundamentacao completa esta em `RELATORIO_BENCHMARK_E03_MODELOS_LLM.md`.
+
+Este relatorio deve ser usado como base interpretativa da Spec E03, sem substituir a criacao formal do Plano P03 e das Tarefas T03.
