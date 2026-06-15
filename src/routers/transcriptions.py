@@ -2,17 +2,38 @@ import logging
 import re
 import secrets
 from time import perf_counter
-from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from schemas.transcriptions import TranscriptionMetadata, TranscriptionResponse
+from schemas.transcriptions import TranscriptionResponse
+from routers.endpoint_security import require_secure_transport_for_public_request
+from routers.metadata_validation import (
+    MAX_CLASS_TITLE_LENGTH,
+    MAX_COURSE_LENGTH,
+    MAX_DISCIPLINE_LENGTH,
+    build_transcription_metadata,
+)
+from routers.upload_limits import read_upload_with_limit
 from services.transcription_service import (
     AudioDecodeError,
     TranscriptionServiceUnavailableError,
     transcribe_audio,
+)
+from services.transcription_artifacts import (
+    TranscriptionArtifactWriteError,
+    build_transcription_artifact_locations,
+    save_transcription_artifacts,
 )
 from settings import Settings, get_settings
 
@@ -28,30 +49,52 @@ SUPPORTED_CONTENT_TYPES = {
     ".m4a": {"audio/mp4", "audio/m4a", "audio/x-m4a"},
 }
 LANGUAGE_PATTERN = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
-SESSION_LABEL_PATTERN = re.compile(r"^[\w][\w -]{0,39}$")
-MAX_SESSION_LABEL_LENGTH = 40
 
 
 def get_authenticated_settings(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     settings: Settings = Depends(get_settings),
 ) -> Settings:
+    started_at = perf_counter()
+    try:
+        require_secure_transport_for_public_request(request=request, settings=settings)
+    except HTTPException as exc:
+        _log_auth_failure(
+            started_at=started_at,
+            status_code=exc.status_code,
+            error_code="insecure_transport",
+        )
+        raise
+
     if settings.api_token is None:
-        logger.warning("transcription_auth_failed reason=missing_api_token")
+        _log_auth_failure(
+            started_at=started_at,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            error_code="missing_api_token",
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Transcription service is unavailable.",
         )
 
     if credentials is None or credentials.scheme.lower() != "bearer":
-        logger.warning("transcription_auth_failed reason=missing_credentials")
+        _log_auth_failure(
+            started_at=started_at,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            error_code="missing_credentials",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required.",
         )
 
     if not secrets.compare_digest(credentials.credentials, settings.api_token):
-        logger.warning("transcription_auth_failed reason=invalid_credentials")
+        _log_auth_failure(
+            started_at=started_at,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            error_code="invalid_credentials",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required.",
@@ -67,7 +110,11 @@ def get_authenticated_settings(
     description=(
         "Receives a recorded audio file and returns a text transcription with "
         "optional class metadata. This endpoint does not provide streaming, TTS, "
-        "or speech-to-speech processing."
+        "or speech-to-speech processing. In local development, the human-readable "
+        "raw transcript is also saved as a .txt file under "
+        "outputs/human/transcriptions; see artifact_locations.human_text_path in "
+        "the response. The technical JSON artifact is separate and is indicated "
+        "by artifact_locations.technical_json_path."
     ),
     response_model=TranscriptionResponse,
     responses={
@@ -76,6 +123,9 @@ def get_authenticated_settings(
         },
         status.HTTP_401_UNAUTHORIZED: {
             "description": "Authentication required.",
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "description": "HTTPS is required in public deployment.",
         },
         status.HTTP_413_CONTENT_TOO_LARGE: {
             "description": "Audio file exceeds the maximum allowed size.",
@@ -102,52 +152,56 @@ async def transcribe_recorded_audio(
         ),
     ],
     course: Annotated[
-        str | None,
+        str,
         Form(
             description=(
                 "Optional name of the course or broader learning context. Use it "
                 "to organize the transcription after it is generated. Example: "
-                "Postgraduate course at Federal University of Goias."
+                "Postgraduate course at Federal University of Goias. Maximum: "
+                f"{MAX_COURSE_LENGTH} characters."
             ),
         ),
-    ] = None,
+    ] = "",
     discipline: Annotated[
-        str | None,
+        str,
         Form(
             description=(
                 "Optional name of the discipline, subject, or class area related "
-                "to the audio. Example: API Engineering for AI."
+                "to the audio. Example: API Engineering for AI. Maximum: "
+                f"{MAX_DISCIPLINE_LENGTH} characters."
             ),
         ),
-    ] = None,
+    ] = "",
     class_date: Annotated[
-        str | None,
+        str,
         Form(
             description=(
-                "Optional date of the class. Use the YYYY-MM-DD format. "
-                "Example: 2026-06-09."
+                "Optional date of the class. Leave this empty if there is no "
+                "date. If filled, use the YYYY-MM-DD format. Example: "
+                "2026-06-09."
             ),
         ),
-    ] = None,
+    ] = "",
     class_title: Annotated[
-        str | None,
+        str,
         Form(
             description=(
                 "Optional title, topic, or human-readable identification of the "
                 "class. It helps identify the transcription later. Example: "
-                "Introduction to API contracts."
+                "Introduction to API contracts. Maximum: "
+                f"{MAX_CLASS_TITLE_LENGTH} characters."
             ),
         ),
-    ] = None,
+    ] = "",
     session_label: Annotated[
-        str | None,
+        str,
         Form(
             description=(
                 "Optional short identifier for the recording session. Use a simple "
                 "value. Example: class-01."
             ),
         ),
-    ] = None,
+    ] = "",
     language: Annotated[
         str,
         Form(
@@ -159,7 +213,7 @@ async def transcribe_recorded_audio(
     ] = "pt-BR",
     settings: Settings = Depends(get_authenticated_settings),
 ) -> TranscriptionResponse:
-    metadata = _build_metadata(
+    metadata = build_transcription_metadata(
         course=course,
         discipline=discipline,
         class_date=class_date,
@@ -173,8 +227,11 @@ async def transcribe_recorded_audio(
         content_type=audio_file.content_type,
     )
 
-    audio_bytes = await audio_file.read()
-    _validate_size(audio_bytes=audio_bytes, settings=settings)
+    audio_bytes = await read_upload_with_limit(
+        audio_file,
+        settings=settings,
+        detail="Audio file exceeds the maximum allowed size.",
+    )
     _validate_audio_container(extension=extension, audio_bytes=audio_bytes)
 
     started_at = perf_counter()
@@ -193,6 +250,11 @@ async def transcribe_recorded_audio(
             metadata=metadata,
             settings=settings,
         )
+        response.artifact_locations = build_transcription_artifact_locations(
+            response,
+            settings=settings,
+        )
+        save_transcription_artifacts(response, settings=settings)
     except AudioDecodeError as exc:
         duration_ms = (perf_counter() - started_at) * 1000
         logger.warning(
@@ -213,6 +275,16 @@ async def transcribe_recorded_audio(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Transcription service is unavailable.",
         ) from exc
+    except TranscriptionArtifactWriteError as exc:
+        duration_ms = (perf_counter() - started_at) * 1000
+        logger.error(
+            "transcription_request_failed status_code=500 error_code=artifact_write_failed duration_ms=%.3f",
+            duration_ms,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal transcription error.",
+        ) from exc
     except Exception:
         duration_ms = (perf_counter() - started_at) * 1000
         logger.error(
@@ -226,59 +298,10 @@ async def transcribe_recorded_audio(
 
     duration_ms = (perf_counter() - started_at) * 1000
     logger.info(
-        "transcription_request_succeeded status_code=200 duration_ms=%.3f",
+        "transcription_request_succeeded status_code=200 artifact_saved=true duration_ms=%.3f",
         duration_ms,
     )
     return response
-
-
-def _build_metadata(
-    *,
-    course: str | None,
-    discipline: str | None,
-    class_date: str | None,
-    class_title: str | None,
-    session_label: str | None,
-) -> TranscriptionMetadata:
-    cleaned_course = _clean_optional_text(course)
-    cleaned_discipline = _clean_optional_text(discipline)
-    cleaned_class_date = _clean_optional_text(class_date)
-    cleaned_class_title = _clean_optional_text(class_title)
-    cleaned_session_label = _clean_optional_text(session_label)
-
-    if cleaned_class_date:
-        try:
-            date.fromisoformat(cleaned_class_date)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="class_date must use YYYY-MM-DD.",
-            ) from exc
-
-    if cleaned_session_label and (
-        len(cleaned_session_label) > MAX_SESSION_LABEL_LENGTH
-        or SESSION_LABEL_PATTERN.fullmatch(cleaned_session_label) is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="session_label must be short and use simple characters.",
-        )
-
-    return TranscriptionMetadata(
-        course=cleaned_course,
-        discipline=cleaned_discipline,
-        class_date=cleaned_class_date,
-        class_title=cleaned_class_title,
-        session_label=cleaned_session_label,
-    )
-
-
-def _clean_optional_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-
-    cleaned = value.strip()
-    return cleaned or None
 
 
 def _validate_language(language: str) -> str:
@@ -322,15 +345,6 @@ def _validate_content_type(*, extension: str, content_type: str | None) -> str:
     return normalized_content_type
 
 
-def _validate_size(*, audio_bytes: bytes, settings: Settings) -> None:
-    max_size_bytes = settings.max_upload_mb * 1024 * 1024
-    if len(audio_bytes) > max_size_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-            detail="Audio file exceeds the maximum allowed size.",
-        )
-
-
 def _validate_audio_container(*, extension: str, audio_bytes: bytes) -> None:
     if extension == ".wav" and _looks_like_wav(audio_bytes):
         return
@@ -354,3 +368,13 @@ def _looks_like_wav(audio_bytes: bytes) -> bool:
 
 def _looks_like_m4a(audio_bytes: bytes) -> bool:
     return len(audio_bytes) >= 12 and audio_bytes[4:8] == b"ftyp"
+
+
+def _log_auth_failure(*, started_at: float, status_code: int, error_code: str) -> None:
+    duration_ms = (perf_counter() - started_at) * 1000
+    logger.warning(
+        "transcription_auth_failed status_code=%s error_code=%s phase=auth duration_ms=%.3f",
+        status_code,
+        error_code,
+        duration_ms,
+    )

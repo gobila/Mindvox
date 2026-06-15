@@ -24,3 +24,18 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+
+# Local benchmark outputs
+.benchmarks/
+
+# Local real inputs/outputs
+inputs/
+uploads/
+outputs/
+transcripts/
+*.wav
+*.m4a
+*.mp3
+*.flac
+*.transcript.txt
+*_transcript.txt

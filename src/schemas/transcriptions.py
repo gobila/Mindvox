@@ -22,6 +22,23 @@ class TranscriptionEngine(BaseModel):
     version: str
 
 
+class ArtifactLocations(BaseModel):
+    human_text_path: str | None = Field(
+        default=None,
+        description=(
+            "Human-readable artifact path. In local defaults, E02 writes raw "
+            "transcription text here and E03 writes processed Markdown here."
+        ),
+    )
+    technical_json_path: str | None = Field(
+        default=None,
+        description=(
+            "Technical JSON artifact path for integrations, audit, queue, or "
+            "future processing. Absolute local paths are not exposed."
+        ),
+    )
+
+
 class TranscriptionResponse(BaseModel):
     transcription_id: str
     text: str
@@ -30,3 +47,4 @@ class TranscriptionResponse(BaseModel):
     segments: list[TranscriptionSegment]
     metadata: TranscriptionMetadata
     engine: TranscriptionEngine
+    artifact_locations: ArtifactLocations | None = None
