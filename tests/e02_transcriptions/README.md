@@ -16,6 +16,10 @@ O objetivo destes testes e verificar o contrato HTTP do endpoint: rota, autentic
 - O `transcription_id` e opaco, usa prefixo `tr_` e nao incorpora nome de arquivo, token ou path.
 - A ausencia de `language` aplica o padrao `pt-BR`.
 - O modo usado nos testes e `MINDVOX_TRANSCRIPTION_MODE=contract`, para testar o contrato sem depender do motor real de STT.
+- A selecao de backend real aceita `MINDVOX_TRANSCRIPTION_BACKEND=auto|mlx-whisper|openai-whisper`.
+- Em `auto`, macOS Apple Silicon usa `mlx-whisper`; Windows/Linux usam `openai-whisper`.
+- `openai-whisper` e backend local cross-platform baseado em PyTorch; nao e API remota da OpenAI e nao se confunde com o modo `provider` da E03.
+- Ambientes que usam `openai-whisper` devem ter FFmpeg instalado e disponivel no `PATH`.
 - A API rejeita requisicao sem token com `401 Unauthorized`.
 - A API rejeita token invalido com `401 Unauthorized`.
 - A API rejeita header `Authorization` malformado com `401 Unauthorized`.
@@ -60,6 +64,22 @@ uv run python -m unittest discover -s tests -v
 
 ## Observacao sobre o motor de STT
 
-Estes testes nao validam qualidade de transcricao por `mlx-whisper`. Eles validam a borda HTTP da E02.
+Estes testes nao validam qualidade de transcricao por `mlx-whisper` ou `openai-whisper`. Eles validam a borda HTTP da E02 e a selecao controlada do backend real.
 
-O motor real deve ser integrado e verificado por testes proprios quando a dependencia local de STT estiver instalada e operacional. Ate la, o modo `contract` e permitido apenas para testes automatizados ou demonstracao controlada do contrato.
+O motor real deve ser verificado por prova humana quando a dependencia local de STT estiver instalada e operacional. Ate la, o modo `contract` e permitido apenas para testes automatizados ou demonstracao controlada do contrato.
+
+Backends reais esperados:
+
+```text
+MINDVOX_TRANSCRIPTION_BACKEND=auto
+MINDVOX_TRANSCRIPTION_BACKEND=mlx-whisper
+MINDVOX_TRANSCRIPTION_BACKEND=openai-whisper
+```
+
+Instalacao:
+
+```bash
+uv sync --extra stt
+uv sync --extra stt-mlx
+uv sync --extra stt-cross-platform
+```

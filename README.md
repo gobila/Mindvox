@@ -21,7 +21,8 @@ Ja estao implementados:
 - perfis de inicializacao `dev`, `prod` e `contract`
 - autenticacao Bearer nos endpoints de negocio
 - documentacao automatica FastAPI nos modos locais
-- modo real de STT com `mlx-whisper`
+- modo real de STT com `mlx-whisper` em macOS Apple Silicon e
+  `openai-whisper` em Windows/Linux
 - modo real de E03 com servidor local OpenAI-compatible ou provider externo
 - modo mockado de contrato para testes sem STT e sem LLM reais
 - fila local de retry da E03 quando a entrada for audio
@@ -71,19 +72,26 @@ Recebe um arquivo de audio e devolve uma transcricao estruturada.
 
 Modos principais:
 
-- `real`: usa `mlx-whisper` com o modelo configurado em
-  `MINDVOX_TRANSCRIPTION_MODEL`
+- `real`: usa o backend configurado em `MINDVOX_TRANSCRIPTION_BACKEND`
 - `contract`: devolve resposta controlada para testar o contrato HTTP sem STT
   real
 
-O motor real padrao da E02 e:
+O backend real padrao da E02 e:
 
 ```text
-mlx-whisper + mlx-community/whisper-large-v3-turbo-fp16
+MINDVOX_TRANSCRIPTION_BACKEND=auto
 ```
 
-Esse modo real foi pensado para macOS com Apple Silicon. Outras maquinas podem
-rodar a API e o modo `contract`, mas nao sao o alvo do STT real com MLX.
+Com `auto`, a selecao e:
+
+- macOS Apple Silicon: `mlx-whisper` com
+  `mlx-community/whisper-large-v3-turbo-fp16`
+- Windows ou Linux: `openai-whisper` com `turbo`
+
+`openai-whisper` e biblioteca Python local baseada em PyTorch. Ela nao chama a
+API da OpenAI e nao depende do modo `provider` da E03. O modo `provider`
+continua sendo apenas para pos-processamento textual por LLM OpenAI-compatible,
+como Groq.
 
 ### `POST /processed-transcriptions/v1.0.0`
 
@@ -130,10 +138,19 @@ Instale as dependencias principais:
 uv sync
 ```
 
-Para usar transcricao real com `mlx-whisper`, instale tambem o extra de STT:
+Para usar transcricao real, instale tambem o extra de STT:
 
 ```bash
 uv sync --extra stt
+```
+
+O extra `stt` escolhe as dependencias por plataforma: `mlx-whisper` em macOS
+Apple Silicon e `openai-whisper` em Windows/Linux. Para forcar uma familia
+especifica:
+
+```bash
+uv sync --extra stt-mlx
+uv sync --extra stt-cross-platform
 ```
 
 Opcionalmente, crie um `.env` local a partir do exemplo:
@@ -318,7 +335,7 @@ que deve ser usado nos endpoints de negocio.
 ## Modo Teste Mockado
 
 Use o modo `contract` quando quiser testar o contrato HTTP sem depender de
-`mlx-whisper`, `llama-server`, modelo local pesado ou provider externo.
+backend real de STT, `llama-server`, modelo local pesado ou provider externo.
 
 Comando:
 
@@ -441,7 +458,9 @@ E02:
 
 ```text
 MINDVOX_TRANSCRIPTION_MODE
+MINDVOX_TRANSCRIPTION_BACKEND
 MINDVOX_TRANSCRIPTION_MODEL
+MINDVOX_TRANSCRIPTION_FALLBACK_MODEL
 MINDVOX_TRANSCRIPTION_OUTPUT_DIR
 MINDVOX_TRANSCRIPTION_TEXT_OUTPUT_DIR
 ```
@@ -489,7 +508,10 @@ Regras importantes:
 - nunca coloque tokens reais no Git
 - em desenvolvimento local, token ausente usa `dev-token`
 - em producao publica, `dev-token` e tratado como token ausente
-- em modo `provider`, a transcricao ou o texto bruto sai da maquina local
+- em modo `provider`, o texto bruto da E03 sai da maquina local para
+  pos-processamento textual por LLM
+- `openai-whisper` e `mlx-whisper` executam STT localmente; o backend
+  cross-platform exige FFmpeg instalado e disponivel no `PATH`
 - em modo `local`, o backend deve apontar para host local ou rede local
 - em modo `provider`, use `https` e configure
   `MINDVOX_LLM_ALLOWED_PROVIDER_HOSTS`

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import platform
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from secrets import token_hex
@@ -30,6 +32,7 @@ SENSITIVE_MODEL_MARKERS = (
 )
 REDACTED_MODEL_LABEL = "configured-model"
 MODEL_CACHE_DIR = Path.home() / ".cache" / "mindvox" / "mlx-whisper"
+SUPPORTED_TRANSCRIPTION_BACKENDS = {"auto", "mlx-whisper", "openai-whisper"}
 
 
 class AudioDecodeError(Exception):
@@ -89,6 +92,37 @@ def _real_transcription(
     metadata: TranscriptionMetadata,
     settings: Settings,
 ) -> TranscriptionResponse:
+    backend = _resolve_transcription_backend(settings)
+    if backend == "mlx-whisper":
+        return _mlx_whisper_transcription(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            language=language,
+            metadata=metadata,
+            settings=settings,
+        )
+    if backend == "openai-whisper":
+        return _openai_whisper_transcription(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            language=language,
+            metadata=metadata,
+            settings=settings,
+        )
+
+    raise TranscriptionServiceUnavailableError(
+        "Unsupported transcription backend."
+    )
+
+
+def _mlx_whisper_transcription(
+    *,
+    audio_bytes: bytes,
+    filename: str,
+    language: str,
+    metadata: TranscriptionMetadata,
+    settings: Settings,
+) -> TranscriptionResponse:
     try:
         import mlx_whisper  # type: ignore[import-not-found]
     except ImportError as exc:
@@ -99,15 +133,15 @@ def _real_transcription(
     try:
         model_reference = _model_reference_for_mlx_whisper(settings.transcription_model)
         engine_language = _language_for_mlx_whisper(language)
-        suffix = "." + filename.rsplit(".", maxsplit=1)[-1].lower()
-        with NamedTemporaryFile(suffix=suffix) as audio_file:
-            audio_file.write(audio_bytes)
-            audio_file.flush()
+        audio_path = _write_temporary_audio(audio_bytes, filename)
+        try:
             result = mlx_whisper.transcribe(
-                audio_file.name,
+                str(audio_path),
                 path_or_hf_repo=model_reference,
                 language=engine_language,
             )
+        finally:
+            _remove_temporary_audio(audio_path)
     except Exception as exc:  # pragma: no cover - depends on the external STT engine.
         raise AudioDecodeError("Audio file cannot be decoded.") from exc
 
@@ -115,7 +149,43 @@ def _real_transcription(
         result=result,
         language=language,
         metadata=metadata,
-        settings=settings,
+        engine_name="mlx-whisper",
+        engine_model=settings.transcription_model,
+    )
+
+
+def _openai_whisper_transcription(
+    *,
+    audio_bytes: bytes,
+    filename: str,
+    language: str,
+    metadata: TranscriptionMetadata,
+    settings: Settings,
+) -> TranscriptionResponse:
+    try:
+        import whisper  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise TranscriptionServiceUnavailableError(
+            "The cross-platform transcription engine is not installed."
+        ) from exc
+
+    try:
+        engine_language = _language_for_whisper(language)
+        audio_path = _write_temporary_audio(audio_bytes, filename)
+        try:
+            model = whisper.load_model(settings.transcription_fallback_model)
+            result = model.transcribe(str(audio_path), language=engine_language)
+        finally:
+            _remove_temporary_audio(audio_path)
+    except Exception as exc:  # pragma: no cover - depends on the external STT engine.
+        raise AudioDecodeError("Audio file cannot be decoded.") from exc
+
+    return _response_from_engine_result(
+        result=result,
+        language=language,
+        metadata=metadata,
+        engine_name="openai-whisper",
+        engine_model=settings.transcription_fallback_model,
     )
 
 
@@ -124,7 +194,8 @@ def _response_from_engine_result(
     result: dict[str, Any],
     language: str,
     metadata: TranscriptionMetadata,
-    settings: Settings,
+    engine_name: str,
+    engine_model: str,
 ) -> TranscriptionResponse:
     raw_segments = result.get("segments") or []
     segments = [
@@ -148,11 +219,53 @@ def _response_from_engine_result(
         segments=segments,
         metadata=metadata,
         engine=TranscriptionEngine(
-            name="mlx-whisper",
-            model=_public_engine_model(settings.transcription_model),
+            name=engine_name,
+            model=_public_engine_model(engine_model),
             version="unknown",
         ),
     )
+
+
+def _resolve_transcription_backend(settings: Settings) -> str:
+    backend = settings.transcription_backend.strip().lower()
+    if backend not in SUPPORTED_TRANSCRIPTION_BACKENDS:
+        raise TranscriptionServiceUnavailableError(
+            "Unsupported transcription backend."
+        )
+
+    if backend != "auto":
+        return backend
+
+    return _auto_transcription_backend()
+
+
+def _auto_transcription_backend() -> str:
+    system = platform.system()
+    if system == "Darwin" and platform.machine().lower() in {
+        "arm64",
+        "aarch64",
+    }:
+        return "mlx-whisper"
+
+    if system in {"Linux", "Windows"}:
+        return "openai-whisper"
+
+    raise TranscriptionServiceUnavailableError(
+        "No automatic transcription backend is available for this platform."
+    )
+
+
+def _write_temporary_audio(audio_bytes: bytes, filename: str) -> Path:
+    suffix = "." + filename.rsplit(".", maxsplit=1)[-1].lower()
+    with NamedTemporaryFile(suffix=suffix, delete=False) as audio_file:
+        audio_file.write(audio_bytes)
+        audio_file.flush()
+        return Path(audio_file.name)
+
+
+def _remove_temporary_audio(audio_path: Path) -> None:
+    with suppress(OSError):
+        audio_path.unlink(missing_ok=True)
 
 
 def _duration_from_segments(segments: list[TranscriptionSegment]) -> float | None:
@@ -201,6 +314,10 @@ def _safe_model_cache_name(model_path: Path) -> str:
 
 
 def _language_for_mlx_whisper(language: str) -> str:
+    return _language_for_whisper(language)
+
+
+def _language_for_whisper(language: str) -> str:
     return language.split("-", maxsplit=1)[0].lower()
 
 

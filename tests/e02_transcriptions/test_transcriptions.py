@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 import unittest
 from pathlib import Path
@@ -15,9 +16,12 @@ sys.path.insert(0, str(SRC_DIR))
 from main import app, create_app  # noqa: E402
 from services.transcription_service import (  # noqa: E402
     TranscriptionServiceUnavailableError,
+    _auto_transcription_backend,
     _language_for_mlx_whisper,
+    _language_for_whisper,
     _prepare_mlx_whisper_model_layout,
     _response_language,
+    transcribe_audio,
 )
 from services.transcription_artifacts import (  # noqa: E402
     _render_human_transcription_text,
@@ -28,7 +32,7 @@ from schemas.transcriptions import (  # noqa: E402
     TranscriptionResponse,
     TranscriptionSegment,
 )
-from settings import DEFAULT_LOCAL_DEV_API_TOKEN  # noqa: E402
+from settings import DEFAULT_LOCAL_DEV_API_TOKEN, get_settings  # noqa: E402
 
 
 VALID_TOKEN = "test-token"
@@ -45,8 +49,14 @@ class TranscriptionsEndpointTest(unittest.TestCase):
             "MINDVOX_TRUSTED_HOSTS": os.environ.get("MINDVOX_TRUSTED_HOSTS"),
             "MINDVOX_RUNTIME_PROFILE": os.environ.get("MINDVOX_RUNTIME_PROFILE"),
             "MINDVOX_TRANSCRIPTION_MODE": os.environ.get("MINDVOX_TRANSCRIPTION_MODE"),
+            "MINDVOX_TRANSCRIPTION_BACKEND": os.environ.get(
+                "MINDVOX_TRANSCRIPTION_BACKEND"
+            ),
             "MINDVOX_TRANSCRIPTION_MODEL": os.environ.get(
                 "MINDVOX_TRANSCRIPTION_MODEL"
+            ),
+            "MINDVOX_TRANSCRIPTION_FALLBACK_MODEL": os.environ.get(
+                "MINDVOX_TRANSCRIPTION_FALLBACK_MODEL"
             ),
             "MINDVOX_TRANSCRIPTION_OUTPUT_DIR": os.environ.get(
                 "MINDVOX_TRANSCRIPTION_OUTPUT_DIR"
@@ -64,9 +74,11 @@ class TranscriptionsEndpointTest(unittest.TestCase):
         os.environ["MINDVOX_TRUSTED_HOSTS"] = ""
         os.environ["MINDVOX_RUNTIME_PROFILE"] = ""
         os.environ["MINDVOX_TRANSCRIPTION_MODE"] = "contract"
+        os.environ["MINDVOX_TRANSCRIPTION_BACKEND"] = "auto"
         os.environ["MINDVOX_TRANSCRIPTION_MODEL"] = (
             "mlx-community/whisper-large-v3-turbo-fp16"
         )
+        os.environ["MINDVOX_TRANSCRIPTION_FALLBACK_MODEL"] = "turbo"
         os.environ["MINDVOX_TRANSCRIPTION_OUTPUT_DIR"] = self.output_directory.name
         os.environ["MINDVOX_TRANSCRIPTION_TEXT_OUTPUT_DIR"] = (
             self.text_output_directory.name
@@ -379,11 +391,109 @@ class TranscriptionsEndpointTest(unittest.TestCase):
 
     def test_real_engine_language_uses_base_language_without_changing_contract_response(self):
         self.assertEqual(_language_for_mlx_whisper("pt-BR"), "pt")
+        self.assertEqual(_language_for_whisper("pt-BR"), "pt")
         self.assertEqual(_language_for_mlx_whisper("en-US"), "en")
         self.assertEqual(
             _response_language(engine_language="pt", requested_language="pt-BR"),
             "pt-BR",
         )
+
+    def test_auto_transcription_backend_prefers_mlx_on_apple_silicon(self):
+        with patch("services.transcription_service.platform.system", return_value="Darwin"):
+            with patch("services.transcription_service.platform.machine", return_value="arm64"):
+                self.assertEqual(_auto_transcription_backend(), "mlx-whisper")
+
+    def test_empty_transcription_backend_configuration_falls_back_to_auto(self):
+        os.environ["MINDVOX_TRANSCRIPTION_BACKEND"] = " "
+        os.environ["MINDVOX_TRANSCRIPTION_FALLBACK_MODEL"] = " "
+
+        settings = get_settings()
+
+        self.assertEqual(settings.transcription_backend, "auto")
+        self.assertEqual(settings.transcription_fallback_model, "turbo")
+
+    def test_auto_transcription_backend_uses_openai_whisper_on_windows_and_linux(self):
+        platforms = [
+            ("Linux", "x86_64"),
+            ("Windows", "AMD64"),
+        ]
+
+        for system, machine in platforms:
+            with self.subTest(system=system, machine=machine):
+                with patch(
+                    "services.transcription_service.platform.system",
+                    return_value=system,
+                ):
+                    with patch(
+                        "services.transcription_service.platform.machine",
+                        return_value=machine,
+                    ):
+                        self.assertEqual(
+                            _auto_transcription_backend(),
+                            "openai-whisper",
+                        )
+
+    def test_auto_transcription_backend_rejects_unsupported_platforms(self):
+        with patch("services.transcription_service.platform.system", return_value="Darwin"):
+            with patch("services.transcription_service.platform.machine", return_value="x86_64"):
+                with self.assertRaises(TranscriptionServiceUnavailableError):
+                    _auto_transcription_backend()
+
+    def test_openai_whisper_backend_returns_structured_response(self):
+        os.environ["MINDVOX_TRANSCRIPTION_MODE"] = "real"
+        os.environ["MINDVOX_TRANSCRIPTION_BACKEND"] = "openai-whisper"
+        os.environ["MINDVOX_TRANSCRIPTION_FALLBACK_MODEL"] = "tiny"
+        calls: dict[str, str] = {}
+
+        class FakeWhisperModel:
+            def transcribe(self, path, *, language):
+                audio_path = Path(path)
+                calls["path"] = path
+                calls["path_exists_during_transcribe"] = str(audio_path.exists())
+                calls["file_header"] = audio_path.read_bytes()[:4].decode("ascii")
+                calls["path_suffix"] = audio_path.suffix
+                calls["language"] = language
+                return {
+                    "text": "Texto transcrito pelo backend cross-platform.",
+                    "language": language,
+                    "segments": [
+                        {
+                            "start": 0.0,
+                            "end": 1.5,
+                            "text": "Texto transcrito.",
+                        }
+                    ],
+                }
+
+        def load_model(model_name):
+            calls["model_name"] = model_name
+            return FakeWhisperModel()
+
+        fake_whisper = SimpleNamespace(load_model=load_model)
+
+        with patch.dict(sys.modules, {"whisper": fake_whisper}):
+            response = transcribe_audio(
+                audio_bytes=self._minimal_wav_bytes(),
+                filename="class_s1.wav",
+                language="pt-BR",
+                metadata=TranscriptionMetadata(discipline="API"),
+                settings=get_settings(),
+            )
+
+        self.assertEqual(response.text, "Texto transcrito pelo backend cross-platform.")
+        self.assertEqual(response.language, "pt-BR")
+        self.assertEqual(response.duration_seconds, 1.5)
+        self.assertEqual(response.segments[0].speaker_label, None)
+        self.assertEqual(response.metadata.discipline, "API")
+        self.assertEqual(response.engine.name, "openai-whisper")
+        self.assertEqual(response.engine.model, "tiny")
+        self.assertEqual(response.engine.version, "unknown")
+        self.assertEqual(calls["model_name"], "tiny")
+        self.assertEqual(calls["language"], "pt")
+        self.assertEqual(calls["path_suffix"], ".wav")
+        self.assertEqual(calls["path_exists_during_transcribe"], "True")
+        self.assertEqual(calls["file_header"], "RIFF")
+        self.assertFalse(Path(calls["path"]).exists())
 
     def test_real_engine_model_layout_accepts_model_safetensors(self):
         with TemporaryDirectory() as directory:
