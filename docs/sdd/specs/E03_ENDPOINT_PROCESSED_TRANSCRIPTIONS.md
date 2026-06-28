@@ -51,6 +51,8 @@ Interpretacao:
 - a E03 pode usar internamente o servico de transcricao da E02 quando receber audio;
 - a E03 nao deve chamar `POST /transcriptions/v1.0.0` por HTTP dentro do mesmo app;
 - a E03 deve chamar servicos internos compartilhados, como a camada de transcricao ja criada.
+- a escolha do backend STT pertence a E02 e ao `transcription_service`; a E03 apenas consome o `raw_text` produzido por essa camada quando `input_type=audio`;
+- o modo `provider` da E03 e exclusivo do pos-processamento textual por LLM OpenAI-compatible, nao da transcricao de audio.
 
 ---
 
@@ -560,6 +562,15 @@ Modos planejados:
 | `contract` | Retornar resposta controlada | Testes automatizados e demonstracao do contrato |
 | `provider` | Usar provider externo de LLM quando configurado | Pos-processamento real demonstravel |
 | `local` | Usar servidor local OpenAI-compatible, como `llama-server` | Pos-processamento real em maquina preparada |
+
+Fronteira obrigatoria com STT:
+
+- os modos desta secao governam apenas o motor textual da E03;
+- `MINDVOX_POSTPROCESSING_MODE=provider` nao significa STT remoto;
+- em modo `provider`, a E03 envia texto bruto ao provider LLM configurado para gerar `didactic_text`, `themes`, `technical_terms`, `technology_mentions` e `processing_notes`;
+- quando a entrada da E03 for audio, a transcricao continua sendo responsabilidade interna da E02, via `transcription_service`;
+- se a E02 evoluir para backends STT multiplataforma, como selecao automatica entre `mlx-whisper` em macOS Apple Silicon e `openai-whisper` em Windows/Linux, a E03 deve herdar essa evolucao sem alterar o contrato de pos-processamento;
+- um eventual STT remoto/provider futuro deve ser especificado na E02 ou em Spec propria, com variavel e contrato separados do `MINDVOX_POSTPROCESSING_MODE`.
 
 Variaveis planejadas:
 

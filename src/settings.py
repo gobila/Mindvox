@@ -40,7 +40,9 @@ DEFAULT_PROCESSED_TRANSCRIPTION_QUEUE_RETRY_SECONDS = 60
 DEFAULT_PROCESSED_TRANSCRIPTION_QUEUE_MAX_ATTEMPTS = 3
 DEFAULT_TRANSCRIPTION_OUTPUT_DIR = "outputs/transcriptions"
 DEFAULT_TRANSCRIPTION_TEXT_OUTPUT_DIR = "outputs/human/transcriptions"
+DEFAULT_TRANSCRIPTION_BACKEND = "auto"
 DEFAULT_TRANSCRIPTION_MODEL = "mlx-community/whisper-large-v3-turbo-fp16"
+DEFAULT_TRANSCRIPTION_FALLBACK_MODEL = "turbo"
 PLACEHOLDER_API_TOKENS = {
     "<set-real-token-only-in-local-env>",
     "replace-with-local-token",
@@ -93,7 +95,9 @@ class Settings:
     processed_transcription_queue_retry_seconds: int
     processed_transcription_queue_max_attempts: int
     transcription_mode: str
+    transcription_backend: str
     transcription_model: str
+    transcription_fallback_model: str
     transcription_output_dir: str
     transcription_text_output_dir: str
 
@@ -277,9 +281,14 @@ def get_settings() -> Settings:
             processed_transcription_queue_max_attempts
         ),
         transcription_mode=transcription_mode,
+        transcription_backend=_read_transcription_backend(),
         transcription_model=os.getenv(
             "MINDVOX_TRANSCRIPTION_MODEL",
             DEFAULT_TRANSCRIPTION_MODEL,
+        ),
+        transcription_fallback_model=_read_non_empty_string(
+            "MINDVOX_TRANSCRIPTION_FALLBACK_MODEL",
+            DEFAULT_TRANSCRIPTION_FALLBACK_MODEL,
         ),
         transcription_output_dir=os.getenv(
             "MINDVOX_TRANSCRIPTION_OUTPUT_DIR",
@@ -345,6 +354,18 @@ def _read_postprocessing_mode(transcription_mode: str) -> str:
         return _postprocessing_mode_for_transcription_mode(transcription_mode)
 
     return normalized
+
+
+def _read_transcription_backend() -> str:
+    raw_value = os.getenv("MINDVOX_TRANSCRIPTION_BACKEND", DEFAULT_TRANSCRIPTION_BACKEND)
+    normalized = raw_value.strip().lower() if raw_value else DEFAULT_TRANSCRIPTION_BACKEND
+    return normalized or DEFAULT_TRANSCRIPTION_BACKEND
+
+
+def _read_non_empty_string(name: str, default: str) -> str:
+    raw_value = os.getenv(name, default)
+    normalized = raw_value.strip() if raw_value else default
+    return normalized or default
 
 
 def _postprocessing_mode_for_transcription_mode(transcription_mode: str) -> str:

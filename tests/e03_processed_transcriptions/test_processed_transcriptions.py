@@ -2667,7 +2667,9 @@ class ProcessedTranscriptionsEndpointTest(unittest.TestCase):
             processed_transcription_queue_retry_seconds=60,
             processed_transcription_queue_max_attempts=3,
             transcription_mode="contract",
+            transcription_backend="auto",
             transcription_model="test-transcription-model",
+            transcription_fallback_model="turbo",
             transcription_output_dir=self.output_directory.name,
             transcription_text_output_dir=self.text_output_directory.name,
         )

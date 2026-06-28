@@ -76,7 +76,11 @@ Implementacao proposta:
 - exigir transporte seguro para `POST /transcriptions/v1.0.0` em deploy publico, aceitando apenas requisicao que chegue a aplicacao com scheme `https`;
 - se TLS terminar em proxy, o proxy e o servidor ASGI devem ser configurados de modo confiavel para repassar o scheme `https`; a aplicacao nao deve confiar em header `X-Forwarded-Proto` enviado livremente pelo cliente;
 - ler o limite de upload por `MINDVOX_MAX_UPLOAD_MB`;
-- usar como motor STT primario `mlx-whisper + mlx-community/whisper-large-v3-turbo-fp16`, conforme [Spec E02, secao 8, Motor STT](../specs/E02_ENDPOINT_TRANSCRIPTIONS.md#8-motor-stt);
+- usar como backend STT preferencial em macOS Apple Silicon `mlx-whisper + mlx-community/whisper-large-v3-turbo-fp16`, conforme [Spec E02, secao 8, Motor STT](../specs/E02_ENDPOINT_TRANSCRIPTIONS.md#8-motor-stt);
+- selecionar backend STT por `MINDVOX_TRANSCRIPTION_BACKEND=auto|mlx-whisper|openai-whisper`;
+- em `auto`, usar `mlx-whisper` em macOS Apple Silicon e `openai-whisper` como backend local cross-platform em Windows/Linux;
+- tratar `openai-whisper` como STT local via PyTorch, nao como provider remoto e nao como chamada a API da OpenAI;
+- documentar FFmpeg como dependencia de sistema para ambientes que usam `openai-whisper`;
 - admitir `mlx-whisper + whisper-small` apenas como fallback de desenvolvimento ou smoke test, sem apresenta-lo como motor final de qualidade;
 - aceitar arquivos `.wav` e `.m4a`;
 - validar nome de arquivo nao vazio, extensao, `content_type`, tamanho e assinatura minima do container de audio;
@@ -119,7 +123,15 @@ Detalhe tecnico de implementacao permitido:
 
 - se o repositorio Hugging Face do modelo final entregar pesos como `model.safetensors`, a camada de servico pode preparar um layout local compativel com `mlx-whisper`, expondo esse mesmo arquivo como `weights.safetensors`;
 - essa adaptacao nao altera o modelo escolhido, nao troca o motor final de qualidade e nao autoriza fallback para modelo diferente;
-- se o contrato HTTP receber idioma regional como `pt-BR`, a camada de servico pode enviar ao motor a forma base esperada por `mlx-whisper`, como `pt`, preservando `pt-BR` na resposta publica do Mindvox.
+- se o contrato HTTP receber idioma regional como `pt-BR`, a camada de servico pode enviar ao backend Whisper selecionado a forma base esperada, como `pt`, preservando `pt-BR` na resposta publica do Mindvox.
+
+Emenda de portabilidade em `2026-06-25`:
+
+- a preservacao do motor final de qualidade continua valendo para o backend MLX em macOS Apple Silicon;
+- a portabilidade multiplataforma nao substitui a prova real historica com `mlx-whisper`;
+- `MINDVOX_TRANSCRIPTION_FALLBACK_MODEL=turbo` define o modelo inicial do backend `openai-whisper`;
+- FFmpeg deve estar disponivel no `PATH` quando o backend real depender de `openai-whisper`;
+- o contrato HTTP e a composicao com a E03 permanecem inalterados.
 
 ---
 
@@ -164,7 +176,9 @@ Variaveis esperadas:
 | `MINDVOX_API_TOKEN` | Token local do MVP para autenticar o endpoint | Ausente ou vazio usa `dev-token` em desenvolvimento local; em producao publica exige token forte externo |
 | `MINDVOX_MAX_UPLOAD_MB` | Limite maximo de upload em MB | Deve ter padrao seguro para desenvolvimento local, inicialmente `500` |
 | `MINDVOX_TRANSCRIPTION_MODE` | Define modo real ou modo de contrato | `contract` somente para testes automatizados e demonstracao controlada |
-| `MINDVOX_TRANSCRIPTION_MODEL` | Define o modelo usado pelo motor STT | Padrao esperado: `mlx-community/whisper-large-v3-turbo-fp16`, conforme [Spec E02 §8](../specs/E02_ENDPOINT_TRANSCRIPTIONS.md#8-motor-stt) |
+| `MINDVOX_TRANSCRIPTION_BACKEND` | Define backend STT real | `auto` escolhe MLX em macOS Apple Silicon e OpenAI Whisper local em Windows/Linux |
+| `MINDVOX_TRANSCRIPTION_MODEL` | Define o modelo usado pelo backend MLX | Padrao esperado: `mlx-community/whisper-large-v3-turbo-fp16`, conforme [Spec E02 §8](../specs/E02_ENDPOINT_TRANSCRIPTIONS.md#8-motor-stt) |
+| `MINDVOX_TRANSCRIPTION_FALLBACK_MODEL` | Define modelo local cross-platform | Padrao inicial: `turbo` para `openai-whisper` |
 | `MINDVOX_TRANSCRIPTION_OUTPUT_DIR` | Pasta local do JSON tecnico da transcricao bruta | Padrao `outputs/transcriptions`; path relativo deve ser resolvido a partir da raiz do projeto |
 | `MINDVOX_TRANSCRIPTION_TEXT_OUTPUT_DIR` | Pasta local do TXT humano da transcricao bruta | Padrao `outputs/human/transcriptions`; propria do modo `dev`/instalacao local |
 
@@ -262,7 +276,7 @@ Regras:
 
 Detalhamento de `engine`:
 
-- `engine.name`: nome controlado do motor usado, como `mlx-whisper` ou marcador explicito de modo de contrato;
+- `engine.name`: nome controlado do motor usado, como `mlx-whisper`, `openai-whisper` ou marcador explicito de modo de contrato;
 - `engine.model`: modelo configurado para a transcricao, sem path local ou detalhe sensivel;
 - `engine.version`: versao conhecida da biblioteca/modelo quando disponivel; quando indisponivel, usar valor controlado como `unknown`.
 
@@ -365,7 +379,7 @@ A documentacao automatica deve permitir conferir:
 4. Criar schemas Pydantic da resposta de transcricao.
 5. Criar camada de servico de transcricao.
 6. Criar modo de contrato para testes e demonstracao controlada.
-7. Criar modo real substituivel para futura execucao com `mlx-whisper + mlx-community/whisper-large-v3-turbo-fp16`.
+7. Criar modo real substituivel para execucao com backend STT configuravel, preservando `mlx-whisper + mlx-community/whisper-large-v3-turbo-fp16` como backend preferencial em macOS Apple Silicon.
 8. Criar router `POST /transcriptions/v1.0.0`.
 9. Implementar autenticacao por Bearer token.
 10. Implementar rejeicao de token ausente, token invalido e header `Authorization` em formato incorreto.

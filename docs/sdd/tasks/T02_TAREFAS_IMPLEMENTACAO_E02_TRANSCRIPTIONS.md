@@ -4,11 +4,12 @@
 
 - `ID`: `T02`
 - `Tipo`: `Tarefas de Implementacao`
-- `Status`: `pronta-para-commit-manual`
+- `Status`: `emenda-multiplataforma-pronta-para-auditoria`
 - `Spec alvo`: `E02_ENDPOINT_TRANSCRIPTIONS.md`
 - `Plano alvo`: `P02_IMPLEMENTACAO_E02_TRANSCRIPTIONS.md`
 - `Endpoint alvo`: `POST /transcriptions/v1.0.0`
 - `Data`: `2026-06-08`
+- `Emenda`: `2026-06-25`, portabilidade STT por backend local cross-platform
 
 ---
 
@@ -76,6 +77,11 @@ Consequencia obrigatoria:
 | T02.13.1 | concluida | Preservar decisao do motor final de qualidade da E02 | Nao substituir `mlx-community/whisper-large-v3-turbo-fp16` por modelo disponivel no N02 do Atrium, cache local ou fallback sem emenda previa da Spec E02, conforme [Plano P02 §5.1](../plans/P02_IMPLEMENTACAO_E02_TRANSCRIPTIONS.md#51-clausula-de-preservacao-do-motor-stt) |
 | T02.13.2 | concluida | Adaptar layout local do modelo `-fp16` para `mlx-whisper` | Quando o modelo final entregar `model.safetensors`, a camada de servico prepara layout compativel expondo o mesmo arquivo como `weights.safetensors`, sem trocar o modelo definido pela E02 |
 | T02.13.3 | concluida | Adaptar idioma regional para o motor real | `pt-BR` permanece no contrato publico da API, mas a camada de servico envia `pt` ao `mlx-whisper`, que espera idioma base |
+| T02.13.4 | concluida | Adicionar selecao explicita de backend STT | `MINDVOX_TRANSCRIPTION_BACKEND=auto|mlx-whisper|openai-whisper` define o backend real sem alterar o contrato HTTP da E02 |
+| T02.13.5 | concluida | Manter `mlx-whisper` como backend preferencial em macOS Apple Silicon | Em `auto`, macOS Apple Silicon continua usando `mlx-whisper` com `MINDVOX_TRANSCRIPTION_MODEL` |
+| T02.13.6 | concluida | Adicionar backend local cross-platform | Em `auto`, Windows/Linux usam `openai-whisper` com `MINDVOX_TRANSCRIPTION_FALLBACK_MODEL`; esse backend roda localmente por PyTorch e nao chama API remota da OpenAI |
+| T02.13.7 | concluida | Separar STT local de provider LLM da E03 | Documentacao deixa claro que `MINDVOX_POSTPROCESSING_MODE=provider` pertence ao pos-processamento textual por LLM OpenAI-compatible, nao a transcricao de audio |
+| T02.13.8 | concluida | Documentar dependencia de sistema para STT cross-platform | FFmpeg deve estar disponivel no `PATH` quando o backend real usar `openai-whisper` |
 | T02.14 | concluida | Criar modo de contrato | Modo de contrato e explicitamente identificado e nao e apresentado como transcricao real |
 | T02.15 | concluida | Criar router de transcricoes | Router especifico declara `POST /transcriptions/v1.0.0` |
 | T02.16 | concluida | Registrar router no app | `src/main.py` inclui o router da E02 |
@@ -178,7 +184,10 @@ Prova real humana obrigatoria antes do fechamento:
 
 ```bash
 uv sync --extra stt
+uv sync --extra stt-mlx
+uv sync --extra stt-cross-platform
 uv run python -c "import mlx_whisper; print('mlx_whisper ok')"
+uv run python -c "import whisper; print('openai_whisper ok')"
 uv run fastapi dev src/main.py
 curl -X POST "http://127.0.0.1:8000/transcriptions/v1.0.0" \
   -H "Authorization: Bearer dev-token" \
@@ -193,7 +202,7 @@ Criterio minimo da prova real humana:
 - retorno `200 OK`;
 - campo `text` presente e nao vazio;
 - texto reconhecivel em relacao ao audio real enviado;
-- `engine.name` igual a `mlx-whisper`;
+- `engine.name` igual a `mlx-whisper` em macOS Apple Silicon ou `openai-whisper` em backend cross-platform;
 - resposta sem token, path local, `.env` ou dado sensivel indevido;
 - logs sem audio bruto, transcricao integral, token, `.env` ou path local sensivel.
 
@@ -245,7 +254,9 @@ Estas tarefas poderao ser encerradas quando:
 
 ## 8. Registro de Fechamento
 
-Status atual: `pronta-para-commit-manual`.
+Status historico da E02 fechada em `2026-06-08`: `pronta-para-commit-manual`.
+
+Status atual da emenda multiplataforma em `2026-06-25`: `pronta-para-auditoria`.
 
 Auditoria final realizada em `2026-06-08`:
 
@@ -258,6 +269,17 @@ Auditoria final realizada em `2026-06-08`:
 - `.env.example` esta liberado para versionamento;
 - nao ha `__pycache__`, `.pyc`, `.DS_Store` ou cache indevido fora da `.venv`;
 - a varredura do diff nao encontrou path local sensivel ou padrao de segredo em linhas adicionadas;
+
+Emenda de portabilidade STT registrada em `2026-06-25`:
+
+- a E02 passou a aceitar `MINDVOX_TRANSCRIPTION_BACKEND=auto|mlx-whisper|openai-whisper`;
+- `auto` preserva `mlx-whisper` em macOS Apple Silicon;
+- `auto` usa `openai-whisper` em Windows/Linux;
+- `openai-whisper` foi registrado como backend local cross-platform baseado em PyTorch, nao como provider remoto ou API OpenAI;
+- `MINDVOX_TRANSCRIPTION_FALLBACK_MODEL` documenta o modelo do backend cross-platform, com padrao `turbo`;
+- FFmpeg foi registrado como dependencia de sistema para ambientes que usam `openai-whisper`;
+- a fronteira com a E03 foi reforcada: `provider` em E03 continua significando LLM externo para pos-processamento textual, nao STT remoto;
+- a prova real historica com `mlx-whisper` permanece valida para a E02 original, mas a emenda cross-platform ainda deve ser auditada antes de eventual commit de fechamento.
 - existe um path local antigo em `docs/mindvox_mentoring_agreement.md`, mas ele e preexistente e nao aparece em linhas adicionadas; a alteracao atual nesse arquivo limita-se a atualizar a rota antiga da E02 para `POST /transcriptions/v1.0.0`.
 
 Pendencias restantes apos prova real humana de `2026-06-09`:

@@ -184,7 +184,7 @@ O endpoint nao deve conter toda a logica de STT dentro do router.
 
 ## 8. Motor STT
 
-O motor STT primario do MVP sera:
+O backend STT primario do MVP em macOS Apple Silicon sera:
 
 ```text
 mlx-whisper + mlx-community/whisper-large-v3-turbo-fp16
@@ -197,6 +197,19 @@ Justificativa:
 - `mlx-whisper` e coerente com a referencia tecnica do N02 do Atrium para STT local;
 - `whisper-large-v3-turbo-fp16` favorece qualidade e desempenho em Apple Silicon;
 - a solucao e mais previsivel para o E02 do que usar um LLM multimodal como primeiro transcritor.
+
+Emenda de portabilidade em `2026-06-25`:
+
+- o contrato HTTP da E02 nao deve depender de um backend STT exclusivo de macOS;
+- `mlx-whisper` permanece o backend preferencial para macOS Apple Silicon;
+- Windows e Linux devem poder usar backend local cross-platform por `openai-whisper`;
+- `openai-whisper` e backend local de STT via PyTorch, nao provider remoto e nao chamada a API da OpenAI;
+- a selecao do backend deve ser configuravel por `MINDVOX_TRANSCRIPTION_BACKEND=auto|mlx-whisper|openai-whisper`;
+- em `auto`, a aplicacao deve preferir `mlx-whisper` em macOS Apple Silicon e `openai-whisper` em Windows/Linux;
+- `MINDVOX_TRANSCRIPTION_MODEL` continua representando o modelo MLX preferencial;
+- `MINDVOX_TRANSCRIPTION_FALLBACK_MODEL` representa o modelo usado pelo backend cross-platform, com padrao inicial `turbo`;
+- ambientes cross-platform devem ter FFmpeg disponivel no `PATH` para decodificacao de audio pelo backend `openai-whisper`;
+- a resposta publica deve continuar expondo `engine.name` e `engine.model` de forma controlada, sem path local ou segredo.
 
 Fallback de desenvolvimento ou smoke test:
 
@@ -789,7 +802,7 @@ Interpretacao:
 | Handler definido com nome explicavel | [x] | Handler `transcribe_recorded_audio` criado |
 | Router registrado no `app` | [x] | `transcriptions_router` registrado em `src/main.py` |
 | Endpoint temporario ou exemplo removido | [x] | Rascunho `src/routers/services.py` removido |
-| Dependencias fora do escopo nao sao importadas | [x] | Implementacao usa FastAPI, Pydantic e biblioteca padrao; `mlx-whisper` so e importado dentro do servico real |
+| Dependencias fora do escopo nao sao importadas | [x] | Implementacao usa FastAPI, Pydantic e biblioteca padrao; backends STT opcionais, como `mlx-whisper` e `openai-whisper`, so sao importados dentro do servico real |
 | Codigo compila | [x] | `py_compile` executado com sucesso |
 | Pasta propria de testes criada | [x] | `tests/e02_transcriptions/` criada |
 | README da pasta de testes criado | [x] | `tests/e02_transcriptions/README.md` criado |
@@ -844,14 +857,15 @@ Decisoes adotadas para o MVP:
 Detalhes resolvidos na implementacao:
 
 - mecanismo concreto de leitura de configuracao: `src/settings.py`, usando variaveis de ambiente;
-- variaveis documentadas para o MVP: `MINDVOX_API_TOKEN`, `MINDVOX_MAX_UPLOAD_MB`, `MINDVOX_TRANSCRIPTION_MODE` e `MINDVOX_TRANSCRIPTION_MODEL`;
+- variaveis documentadas para o MVP: `MINDVOX_API_TOKEN`, `MINDVOX_MAX_UPLOAD_MB`, `MINDVOX_TRANSCRIPTION_MODE`, `MINDVOX_TRANSCRIPTION_BACKEND`, `MINDVOX_TRANSCRIPTION_MODEL` e `MINDVOX_TRANSCRIPTION_FALLBACK_MODEL`;
 - schema de resposta: modelos Pydantic em `src/schemas/transcriptions.py`;
 - router: `src/routers/transcriptions.py`;
 - servico substituivel: `src/services/transcription_service.py`;
-- modo real: tenta usar `mlx-whisper` com o modelo configurado; se o motor nao estiver instalado/disponivel, retorna erro controlado `503`;
-- dependencia STT real: declarada como extra opcional `stt`; para instalar, usar `uv sync --extra stt`;
+- modo real: resolve o backend por `MINDVOX_TRANSCRIPTION_BACKEND`; em `auto`, usa `mlx-whisper` em macOS Apple Silicon e `openai-whisper` em Windows/Linux; se o motor selecionado nao estiver instalado/disponivel, retorna erro controlado `503`;
+- dependencia STT real: declarada como extras opcionais `stt`, `stt-mlx` e `stt-cross-platform`; para instalacao automatica por plataforma, usar `uv sync --extra stt`;
+- dependencia de sistema para STT real: FFmpeg deve estar disponivel no `PATH` nos ambientes que dependem de decodificacao por `openai-whisper`;
 - compatibilidade do modelo final: quando o repositorio `mlx-community/whisper-large-v3-turbo-fp16` entregar pesos como `model.safetensors`, a camada de servico prepara layout local compativel com `mlx-whisper`, expondo o mesmo arquivo como `weights.safetensors`, sem trocar o modelo final de qualidade da E02;
-- idioma do motor real: quando o contrato publico receber `pt-BR`, a camada de servico envia `pt` ao `mlx-whisper`, preservando `pt-BR` na resposta publica do Mindvox;
+- idioma do motor real: quando o contrato publico receber `pt-BR`, a camada de servico envia `pt` ao backend Whisper selecionado, preservando `pt-BR` na resposta publica do Mindvox;
 - modo de contrato: habilitado por `MINDVOX_TRANSCRIPTION_MODE=contract`, permitido apenas para testes automatizados e demonstracao controlada do contrato HTTP;
 - testes da E02: `tests/e02_transcriptions/test_transcriptions.py`;
 - README dos testes da E02: `tests/e02_transcriptions/README.md`.
@@ -891,6 +905,7 @@ Teste manual real bloqueante antes do commit:
 ```bash
 uv sync --extra stt
 uv run python -c "import mlx_whisper; print('mlx_whisper ok')"
+uv run python -c "import whisper; print('openai_whisper ok')"
 uv run fastapi dev src/main.py
 curl -X POST "http://127.0.0.1:8000/transcriptions/v1.0.0" \
   -H "Authorization: Bearer dev-token" \
@@ -905,7 +920,7 @@ Criterio de aprovacao do teste manual real:
 - retorno `200 OK`;
 - campo `text` presente e nao vazio;
 - texto reconhecivel em relacao ao audio real enviado;
-- `engine.name` igual a `mlx-whisper`;
+- `engine.name` igual a `mlx-whisper` em macOS Apple Silicon ou `openai-whisper` no backend cross-platform;
 - resposta sem token, path local, `.env` ou dado sensivel indevido;
 - logs sem audio bruto, transcricao integral, token, `.env` ou path local sensivel.
 
